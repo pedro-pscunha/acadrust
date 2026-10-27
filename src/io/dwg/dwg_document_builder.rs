@@ -3163,34 +3163,44 @@ impl DwgDocumentBuilder {
                 .map(|l| (l.handle.value(), l.name.clone()))
                 .collect();
             if !app_name_by_handle.is_empty() {
-                for_each_mut(&mut document.entities, |entity| {
-                    let records: Vec<crate::xdata::ExtendedDataRecord> = {
-                        let xd = &entity.common().extended_data;
-                        xd.raw_dwg_eed
-                            .iter()
-                            .filter_map(|(app_handle, bytes)| {
-                                let Some(name) = app_name_by_handle.get(app_handle) else {
-                                    return None;
-                                };
-                                if xd.get_record(name).is_some() {
-                                    return None;
-                                }
-                                crate::io::dwg::eed_codec::decode_values(bytes, wide, |h| {
-                                    layer_name_by_handle.get(&h).cloned()
-                                })
-                                .map(|values| {
-                                    let mut rec =
-                                        crate::xdata::ExtendedDataRecord::new(name.clone());
-                                    rec.values = values;
-                                    rec
-                                })
+                let records_of = |xd: &crate::xdata::ExtendedData| {
+                    xd.raw_dwg_eed
+                        .iter()
+                        .filter_map(|(app_handle, bytes)| {
+                            let name = app_name_by_handle.get(app_handle)?;
+                            if xd.get_record(name).is_some() {
+                                return None;
+                            }
+                            crate::io::dwg::eed_codec::decode_values(bytes, wide, |h| {
+                                layer_name_by_handle.get(&h).cloned()
                             })
-                            .collect()
-                    };
+                            .map(|values| {
+                                let mut rec = crate::xdata::ExtendedDataRecord::new(name.clone());
+                                rec.values = values;
+                                rec
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                };
+                for_each_mut(&mut document.entities, |entity| {
+                    let records = records_of(&entity.common().extended_data);
                     if !records.is_empty() {
                         let xd = &mut std::sync::Arc::make_mut(entity).common_mut().extended_data;
                         for record in records {
                             xd.add_record(record);
+                        }
+                    }
+                    // ATTRIBs were attached to their INSERT before this pass, so they are
+                    // no longer in document.entities. Decode their EED in place as well.
+                    if matches!(entity.as_ref(), EntityType::Insert(insert) if insert.attributes.iter().any(|a| !a.common.extended_data.raw_dwg_eed.is_empty()))
+                    {
+                        if let EntityType::Insert(insert) = std::sync::Arc::make_mut(entity) {
+                            for attribute in &mut insert.attributes {
+                                let records = records_of(&attribute.common.extended_data);
+                                for record in records {
+                                    attribute.common.extended_data.add_record(record);
+                                }
+                            }
                         }
                     }
                     if self.obj_reader.version().r13_14_only() {
