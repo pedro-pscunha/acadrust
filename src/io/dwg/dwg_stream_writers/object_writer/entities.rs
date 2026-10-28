@@ -5909,6 +5909,66 @@ mod tests {
     }
 
     #[test]
+    fn polyline_owned_list_excludes_unlisted_same_owner_vertex_records() {
+        use crate::io::dwg::dwg_document_builder::DwgDocumentBuilder;
+        use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+        use crate::DxfWriter;
+
+        for version in [DxfVersion::AC1018, DxfVersion::AC1021, DxfVersion::AC1032] {
+            for closed in [false, true] {
+                let mut source = CadDocument::with_version(version);
+                let mut polyline = Polyline2D::new();
+                if closed {
+                    polyline.flags = PolylineFlags::CLOSED;
+                }
+                for point in [(1.0, 2.0), (5.0, 7.0), (11.0, 13.0)] {
+                    polyline.add_vertex(Vertex2D::new(Vector3::new(point.0, point.1, 0.0)));
+                }
+                let expected = polyline.vertices.clone();
+                let handle = source.add_entity(EntityType::Polyline2D(polyline)).unwrap();
+                let parent = source.get_entity(handle).unwrap().common();
+                let mut writer = DwgObjectWriter::new(&source).unwrap();
+                // These records claim the same owner but are not in the parent's owned list.
+                // Real drawings retain such orphaned old copies after polyline edits.
+                for (index, vertex) in expected.iter().enumerate() {
+                    writer.write_vertex2d(
+                        vertex,
+                        Handle::new(0xF000 + index as u64),
+                        handle,
+                        parent,
+                    );
+                }
+                let (bytes, handles, _, _) = writer.write();
+                let reader = DwgObjectReader::new(
+                    bytes,
+                    version,
+                    handles
+                        .into_iter()
+                        .map(|(h, at)| (h, i64::from(at)))
+                        .collect(),
+                )
+                .unwrap();
+                let mut restored = CadDocument::with_version(version);
+                DwgDocumentBuilder::new(reader).build(&mut restored);
+                let EntityType::Polyline2D(polyline) = restored.get_entity(handle).unwrap() else {
+                    panic!("polyline missing");
+                };
+                assert_eq!(polyline.vertices, expected, "{version:?}, closed={closed}");
+                assert_eq!(polyline.is_closed(), closed);
+                let dxf = DxfWriter::new(&restored)
+                    .with_version(DxfVersion::AC1014)
+                    .write_to_vec()
+                    .unwrap();
+                let dxf = String::from_utf8(dxf).unwrap();
+                assert_eq!(
+                    dxf.lines().filter(|line| line.trim() == "VERTEX").count(),
+                    3
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wire_color_uses_bit_short_in_every_dwg_version() {
         use crate::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader;
 

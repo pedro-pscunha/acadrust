@@ -221,18 +221,20 @@ fn read_owned_vertex_handles(reader: &mut DwgMergedReader, owned_count: i32) -> 
 ///
 /// R2004+ polylines carry that order as their owned-handle list. R13–R2000
 /// polylines link the same children with each record's next-entity handle.
-/// A list or chain that does not cover every child leaves the handle-sorted
-/// collection unchanged.
+/// An explicit owned list is authoritative: same-owner records absent from it
+/// are orphaned old children, not extra outline segments. Legacy files without
+/// that list use their next-entity chain when it covers every collected child.
 fn order_pending_vertices(
-    verts: &mut [PendingVertex],
+    verts: &mut Vec<PendingVertex>,
     owned: Option<&[u64]>,
     next_handles: &HashMap<Handle, Handle>,
 ) {
-    let ranks = if let Some(order) = owned.filter(|order| !order.is_empty()) {
+    let ranks = if let Some(order) = owned {
         let mut ranks = HashMap::with_capacity(order.len());
         for (index, handle) in order.iter().enumerate() {
             ranks.entry(*handle).or_insert(index);
         }
+        verts.retain(|vertex| ranks.contains_key(&vertex.handle_value()));
         ranks
     } else if let Some(ranks) =
         vertex_chain_ranks(verts.iter().map(PendingVertex::handle_value), next_handles)
@@ -2371,7 +2373,11 @@ impl DwgDocumentBuilder {
             if let Some(mut verts) = pending.vertices.remove(&poly_handle) {
                 order_pending_vertices(
                     &mut verts,
-                    pending.vertex_order.get(&poly_handle).map(Vec::as_slice),
+                    pending
+                        .vertex_order
+                        .get(&poly_handle)
+                        .filter(|_| self.obj_reader.version().r2004_plus())
+                        .map(Vec::as_slice),
                     &entity_next_handles,
                 );
                 match &mut entity {
