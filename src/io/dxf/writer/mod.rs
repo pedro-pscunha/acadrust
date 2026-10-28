@@ -354,8 +354,6 @@ impl<'a> DxfWriter<'a> {
 }
 
 fn count_extra_handles(document: &CadDocument, version: crate::types::DxfVersion) -> u64 {
-    use crate::objects::ObjectType;
-
     let mut count = 0u64;
 
     for entity in document.entities() {
@@ -420,13 +418,6 @@ fn count_extra_handles(document: &CadDocument, version: crate::types::DxfVersion
                 }
             }
             _ => {}
-        }
-    }
-
-    // Count SortEntitiesTable sort entries (allocate_handle used for each)
-    for obj in document.objects.values() {
-        if let ObjectType::SortEntitiesTable(table) = obj {
-            count += table.len() as u64;
         }
     }
 

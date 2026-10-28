@@ -8732,22 +8732,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // Block owner handle
         self.writer.write_handle(330, table.block_owner_handle)?;
 
-        // Allocate new unique sort handles to avoid conflicts with entity handles.
-        // Sort entries by original sort_handle to preserve relative draw order,
-        // then assign sequential new handles so ascending order is maintained.
-        let entries: Vec<_> = table.entries().collect();
-        let mut sorted_indices: Vec<usize> = (0..entries.len()).collect();
-        sorted_indices.sort_by_key(|&i| entries[i].sort_handle.value());
-
-        let mut new_handles = vec![Handle::NULL; entries.len()];
-        for &idx in &sorted_indices {
-            new_handles[idx] = self.allocate_handle();
-        }
-
-        // Write entries in original order with new unique handles
-        for (i, entry) in entries.iter().enumerate() {
+        // Sort handles are keys, not object identities: preserve them exactly. Entities
+        // absent from this table use their own handles as keys, so renumbering only the
+        // listed entries changes their position relative to unlisted entities.
+        for entry in table.entries() {
             self.writer.write_handle(331, entry.entity_handle)?;
-            self.writer.write_handle(5, new_handles[i])?;
+            self.writer.write_handle(5, entry.sort_handle)?;
         }
 
         Ok(())
