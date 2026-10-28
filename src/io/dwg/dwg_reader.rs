@@ -520,7 +520,11 @@ fn extract_acds_record_blobs(buf: &[u8], modeler_handles: &HashSet<u64>) -> Vec<
     }
     // A record can point to an external blob segment before or after its table.
     // Pair only blobs not already claimed by table offsets, and require an exact
-    // count so stray magic cannot shift the association.
+    // count so stray magic cannot shift the association. A solid can be listed in
+    // more than one record table: it is one orphan, and none once a table claimed
+    // its body.
+    let mut seen: HashSet<u64> = out.iter().map(|(h, _)| *h).collect();
+    orphan_handles.retain(|h| seen.insert(*h));
     if !orphan_handles.is_empty() {
         let pool: Vec<Vec<u8>> = extract_acds_sab_blob_ranges(buf)
             .into_iter()
@@ -3526,6 +3530,59 @@ mod dwg_reader_tests {
                 expected,
             );
         }
+    }
+
+    /// A datastore can list the same solid in two record tables (Eztec Firenze TERR R00: the ASM
+    /// table and a second one). When neither table holds that solid's body, which lives in an
+    /// external segment, the solid must be one orphan, not one per table: the exact-count pairing
+    /// with the unclaimed external bodies otherwise fails and the solid loses its geometry.
+    #[test]
+    fn acds_solid_listed_in_two_tables_still_pairs_with_its_external_blob() {
+        fn blob(label: u8) -> Vec<u8> {
+            let mut value = b"ASM BinaryFile".to_vec();
+            value.push(label);
+            value.extend_from_slice(ACIS_END_MARKER);
+            value
+        }
+        fn table(records: &[(u32, Vec<u8>)]) -> Vec<u8> {
+            let base = 48 + 20 * records.len();
+            let mut seg = vec![0u8; base];
+            let mut data = Vec::new();
+            for (index, (handle, value)) in records.iter().enumerate() {
+                let entry = 48 + index * 20;
+                seg[entry..entry + 4].copy_from_slice(&0x14u32.to_le_bytes());
+                seg[entry + 8..entry + 12].copy_from_slice(&handle.to_le_bytes());
+                seg[entry + 16..entry + 20].copy_from_slice(&(data.len() as u32).to_le_bytes());
+                data.extend_from_slice(value);
+            }
+            seg.extend_from_slice(&data);
+            seg[..8].copy_from_slice(b"\xAC\xD5_data_");
+            let size = seg.len() as u64;
+            seg[16..24].copy_from_slice(&size.to_le_bytes());
+            seg
+        }
+        let mut buffer = table(&[(0x22, vec![0; 4]), (0x91, blob(1)), (0x92, Vec::new())]);
+        buffer.extend(table(&[(0xD3, vec![0; 4]), (0x92, Vec::new())]));
+        let mut external = vec![0u8; 64];
+        external[..8].copy_from_slice(b"\xAC\xD5_data_");
+        external.extend(blob(2));
+        let size = external.len() as u64;
+        external[16..24].copy_from_slice(&size.to_le_bytes());
+        buffer.extend(external);
+
+        let extracted = extract_acds_record_blobs(&buffer, &HashSet::from([0x91u64, 0x92]));
+        let body = |h: u64| {
+            extracted
+                .iter()
+                .find(|(c, _)| *c == h)
+                .map(|(_, b)| b.clone())
+        };
+        assert_eq!(body(0x91), Some(blob(1)));
+        assert_eq!(
+            body(0x92),
+            Some(blob(2)),
+            "the solid listed in both tables keeps its external body"
+        );
     }
 }
 
