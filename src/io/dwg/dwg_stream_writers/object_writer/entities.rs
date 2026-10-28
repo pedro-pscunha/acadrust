@@ -2653,7 +2653,7 @@ impl<'a> DwgObjectWriter<'a> {
                 None
             };
             self.next_handle = (i + 1 < vertex_handles.len()).then(|| vertex_handles[i + 1]);
-            self.write_vertex2d(v, vh, e.common.handle, &e.common.layer, &e.common.color);
+            self.write_vertex2d(v, vh, e.common.handle, &e.common);
         }
 
         // Write SEQEND — last in polyline chain
@@ -2693,26 +2693,27 @@ impl<'a> DwgObjectWriter<'a> {
         self.next_handle = saved_next;
     }
 
-    fn write_vertex2d(
+    /// Common data of a polyline's VERTEX: AutoCAD keeps a vertex's layer, colour, linetype,
+    /// linetype scale and lineweight equal to its polyline's (AUDIT reports any other value).
+    fn write_vertex_common(
         &mut self,
-        v: &Vertex2D,
+        type_code: i16,
         vertex_handle: Handle,
         owner: Handle,
-        parent_layer: &str,
-        parent_color: &crate::types::Color,
+        parent: &EntityCommon,
     ) {
         self.write_common_entity_data(
-            common::OBJ_VERTEX_2D,
+            type_code,
             vertex_handle,
             owner,
-            parent_layer,
-            parent_color,
-            &crate::types::LineWeight::ByLayer,
+            &parent.layer,
+            &parent.color,
+            &parent.line_weight,
             &crate::types::Transparency::default(),
             false,
-            1.0,
-            "ByLayer",
-            &None,
+            parent.linetype_scale,
+            &parent.linetype,
+            &parent.linetype_handle,
             &crate::xdata::ExtendedData::default(),
             &[],
             &None,
@@ -2728,6 +2729,16 @@ impl<'a> DwgObjectWriter<'a> {
             &None,
             &None,
         );
+    }
+
+    fn write_vertex2d(
+        &mut self,
+        v: &Vertex2D,
+        vertex_handle: Handle,
+        owner: Handle,
+        parent: &EntityCommon,
+    ) {
+        self.write_vertex_common(common::OBJ_VERTEX_2D, vertex_handle, owner, parent);
 
         // Flags EC 70 NOT bit-pair-coded
         self.writer.write_byte(v.flags.bits() as u8);
@@ -2822,7 +2833,7 @@ impl<'a> DwgObjectWriter<'a> {
                 None
             };
             self.next_handle = (i + 1 < vertex_handles.len()).then(|| vertex_handles[i + 1]);
-            self.write_vertex3d(v, vh, e.common.handle, &e.common.layer, &e.common.color);
+            self.write_vertex3d(v, vh, e.common.handle, &e.common);
         }
 
         // Write SEQEND — last in polyline chain
@@ -2867,36 +2878,9 @@ impl<'a> DwgObjectWriter<'a> {
         v: &Vertex3DPolyline,
         vertex_handle: Handle,
         owner: Handle,
-        parent_layer: &str,
-        parent_color: &crate::types::Color,
+        parent: &EntityCommon,
     ) {
-        self.write_common_entity_data(
-            common::OBJ_VERTEX_3D,
-            vertex_handle,
-            owner,
-            parent_layer,
-            parent_color,
-            &crate::types::LineWeight::ByLayer,
-            &crate::types::Transparency::default(),
-            false,
-            1.0,
-            "ByLayer",
-            &None,
-            &crate::xdata::ExtendedData::default(),
-            &[],
-            &None,
-            None,
-            None,
-            0,
-            &None,
-            0,
-            0,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-        );
+        self.write_vertex_common(common::OBJ_VERTEX_3D, vertex_handle, owner, parent);
 
         self.writer.write_byte(v.flags as u8); // Flags EC 70
         self.writer.write_3bit_double(v.position);
@@ -3133,33 +3117,7 @@ impl<'a> DwgObjectWriter<'a> {
                 None
             };
             self.next_handle = (i + 1 < vertex_handles.len()).then(|| vertex_handles[i + 1]);
-            self.write_common_entity_data(
-                common::OBJ_VERTEX_MESH,
-                vh,
-                e.common.handle,
-                &e.common.layer,
-                &e.common.color,
-                &crate::types::LineWeight::ByLayer,
-                &crate::types::Transparency::default(),
-                false,
-                1.0,
-                "ByLayer",
-                &None,
-                &crate::xdata::ExtendedData::default(),
-                &[],
-                &None,
-                None,
-                None,
-                0,
-                &None,
-                0,
-                0,
-                &None,
-                &None,
-                &None,
-                &None,
-                &None,
-            );
+            self.write_vertex_common(common::OBJ_VERTEX_MESH, vh, e.common.handle, &e.common);
             self.writer.write_byte(v.flags as u8);
             self.writer.write_3bit_double(v.location);
             self.register_object(vh);
