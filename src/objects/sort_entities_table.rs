@@ -2,6 +2,7 @@
 //!
 //! Controls the draw order of entities within a block reference.
 
+use crate::tables::BlockRecord;
 use crate::types::Handle;
 use std::collections::HashMap;
 
@@ -95,6 +96,13 @@ pub struct SortEntitiesTable {
     /// DXF version that produced `raw_dxf_codes`.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub raw_dxf_version: Option<crate::types::DxfVersion>,
+}
+
+enum Placement {
+    Back,
+    Front,
+    Above(Handle),
+    Below(Handle),
 }
 
 impl SortEntitiesTable {
@@ -225,58 +233,73 @@ impl SortEntitiesTable {
         self.entry_map.clear();
     }
 
-    /// Sends an entity to the back (lowest sort handle - drawn first).
-    ///
-    /// Returns the assigned sort handle.
-    pub fn send_to_back(&mut self, entity_handle: Handle) -> Handle {
-        // Find the minimum sort handle, then use one less
-        let min_handle = self
-            .entries
-            .iter()
-            .map(|e| e.sort_handle.value())
-            .min()
-            .unwrap_or(0x100);
-
-        let new_handle = Handle::new(min_handle.saturating_sub(1).max(1));
-        self.add_entry(entity_handle, new_handle);
-        new_handle
+    /// Sends an entity behind every member of its owning block, including unlisted entities.
+    /// Returns the assigned key, or None for the wrong block or a missing entity.
+    pub fn send_to_back(&mut self, entity_handle: Handle, block: &BlockRecord) -> Option<Handle> {
+        self.reorder(entity_handle, block, Placement::Back)
     }
 
-    /// Brings an entity to the front (highest sort handle - drawn last).
-    ///
-    /// Returns the assigned sort handle.
-    pub fn bring_to_front(&mut self, entity_handle: Handle) -> Handle {
-        // Find the maximum sort handle, then use one more
-        let max_handle = self
-            .entries
-            .iter()
-            .map(|e| e.sort_handle.value())
-            .max()
-            .unwrap_or(0);
-
-        let new_handle = Handle::new(max_handle.saturating_add(1));
-        self.add_entry(entity_handle, new_handle);
-        new_handle
+    /// Brings an entity in front of every member of its owning block, including unlisted entities.
+    /// Returns the assigned key, or None for the wrong block or a missing entity.
+    pub fn bring_to_front(&mut self, entity_handle: Handle, block: &BlockRecord) -> Option<Handle> {
+        self.reorder(entity_handle, block, Placement::Front)
     }
 
-    /// Moves an entity above another (drawn after/on top of).
-    ///
-    /// Returns the assigned sort handle, or None if target_handle is not in the table.
-    pub fn move_above(&mut self, entity_handle: Handle, target_handle: Handle) -> Option<Handle> {
-        let target_sort = self.get_sort_handle(target_handle)?;
-        let new_handle = Handle::new(target_sort.value().saturating_add(1));
-        self.add_entry(entity_handle, new_handle);
-        Some(new_handle)
+    /// Moves an entity immediately above another member of the owning block.
+    /// Returns None for the wrong block or if either entity is absent from that block.
+    pub fn move_above(
+        &mut self,
+        entity_handle: Handle,
+        target_handle: Handle,
+        block: &BlockRecord,
+    ) -> Option<Handle> {
+        self.reorder(entity_handle, block, Placement::Above(target_handle))
     }
 
-    /// Moves an entity below another (drawn before/under).
-    ///
-    /// Returns the assigned sort handle, or None if target_handle is not in the table.
-    pub fn move_below(&mut self, entity_handle: Handle, target_handle: Handle) -> Option<Handle> {
-        let target_sort = self.get_sort_handle(target_handle)?;
-        let new_handle = Handle::new(target_sort.value().saturating_sub(1).max(1));
-        self.add_entry(entity_handle, new_handle);
-        Some(new_handle)
+    /// Moves an entity immediately below another member of the owning block.
+    /// Returns None for the wrong block or if either entity is absent from that block.
+    pub fn move_below(
+        &mut self,
+        entity_handle: Handle,
+        target_handle: Handle,
+        block: &BlockRecord,
+    ) -> Option<Handle> {
+        self.reorder(entity_handle, block, Placement::Below(target_handle))
+    }
+
+    fn reorder(
+        &mut self,
+        entity: Handle,
+        block: &BlockRecord,
+        placement: Placement,
+    ) -> Option<Handle> {
+        if self.block_owner_handle != block.handle || !block.entity_handles.contains(&entity) {
+            return None;
+        }
+        let mut order = block.entity_handles.clone();
+        order.sort_by_key(|h| (self.effective_sort_handle(*h).value(), h.value()));
+        // Moving relative to oneself changes nothing, including imported partial-table keys.
+        if matches!(placement, Placement::Above(target) | Placement::Below(target) if target == entity)
+        {
+            return Some(self.effective_sort_handle(entity));
+        }
+        order.retain(|h| *h != entity);
+        let at = match placement {
+            Placement::Back => 0,
+            Placement::Front => order.len(),
+            Placement::Above(target) => order.iter().position(|h| *h == target)? + 1,
+            Placement::Below(target) => order.iter().position(|h| *h == target)?,
+        };
+        order.insert(at, entity);
+        // A space-wide permutation needs no arithmetic gaps and cannot overflow or tie keys.
+        // Imported key values remain untouched until an explicit native ordering operation.
+        let mut keys = order.clone();
+        keys.sort_unstable_by_key(|h| h.value());
+        self.clear();
+        for (entity, key) in order.into_iter().zip(keys) {
+            self.add_entry(entity, key);
+        }
+        self.get_sort_handle(entity)
     }
 
     /// Rebuilds the entry map from the entries vector.
@@ -420,25 +443,32 @@ mod tests {
         assert_eq!(sorted[2].entity_handle, Handle::new(0x100));
     }
 
+    fn block_table() -> (SortEntitiesTable, BlockRecord) {
+        let mut block = BlockRecord::new("Test");
+        block.handle = Handle::new(0x1F);
+        block.entity_handles = vec![Handle::new(0x100), Handle::new(0x101), Handle::new(0x102)];
+        (SortEntitiesTable::for_block(block.handle), block)
+    }
+
     #[test]
     fn test_send_to_back() {
-        let mut table = SortEntitiesTable::new();
+        let (mut table, block) = block_table();
         table.add_entry(Handle::new(0x100), Handle::new(0x50));
         table.add_entry(Handle::new(0x101), Handle::new(0x60));
 
-        let handle = table.send_to_back(Handle::new(0x102));
+        let handle = table.send_to_back(Handle::new(0x102), &block).unwrap();
 
-        assert!(handle.value() < 0x50);
+        assert!(handle.value() < table.effective_sort_handle(Handle::new(0x100)).value());
         assert!(table.contains(Handle::new(0x102)));
     }
 
     #[test]
     fn test_bring_to_front() {
-        let mut table = SortEntitiesTable::new();
+        let (mut table, block) = block_table();
         table.add_entry(Handle::new(0x100), Handle::new(0x50));
         table.add_entry(Handle::new(0x101), Handle::new(0x60));
 
-        let handle = table.bring_to_front(Handle::new(0x102));
+        let handle = table.bring_to_front(Handle::new(0x102), &block).unwrap();
 
         assert!(handle.value() > 0x60);
         assert!(table.contains(Handle::new(0x102)));
@@ -446,10 +476,10 @@ mod tests {
 
     #[test]
     fn test_move_above() {
-        let mut table = SortEntitiesTable::new();
+        let (mut table, block) = block_table();
         table.add_entry(Handle::new(0x100), Handle::new(0x50));
 
-        let handle = table.move_above(Handle::new(0x101), Handle::new(0x100));
+        let handle = table.move_above(Handle::new(0x101), Handle::new(0x100), &block);
 
         assert!(handle.is_some());
         assert!(handle.unwrap().value() > 0x50);
@@ -457,19 +487,19 @@ mod tests {
 
     #[test]
     fn test_move_below() {
-        let mut table = SortEntitiesTable::new();
+        let (mut table, block) = block_table();
         table.add_entry(Handle::new(0x100), Handle::new(0x50));
 
-        let handle = table.move_below(Handle::new(0x101), Handle::new(0x100));
+        let handle = table.move_below(Handle::new(0x101), Handle::new(0x100), &block);
 
         assert!(handle.is_some());
-        assert!(handle.unwrap().value() < 0x50);
+        assert!(handle.unwrap().value() < table.effective_sort_handle(Handle::new(0x100)).value());
     }
 
     #[test]
     fn test_move_above_nonexistent() {
-        let mut table = SortEntitiesTable::new();
-        let result = table.move_above(Handle::new(0x101), Handle::new(0x100));
+        let (mut table, block) = block_table();
+        let result = table.move_above(Handle::new(0x101), Handle::new(0x200), &block);
         assert!(result.is_none());
     }
 
