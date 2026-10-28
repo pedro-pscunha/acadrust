@@ -2159,8 +2159,16 @@ impl<'a> DwgObjectWriter<'a> {
                         self.writer.write_byte(2);
                         self.writer.write_2raw_double(ca.center);
                         self.writer.write_bit_double(ca.radius);
-                        self.writer.write_bit_double(ca.start_angle);
-                        self.writer.write_bit_double(ca.end_angle);
+                        // A clockwise edge stores 360 minus each real angle (see the reader).
+                        let stored = |a: f64| {
+                            if ca.counter_clockwise {
+                                a
+                            } else {
+                                std::f64::consts::TAU - a
+                            }
+                        };
+                        self.writer.write_bit_double(stored(ca.start_angle));
+                        self.writer.write_bit_double(stored(ca.end_angle));
                         self.writer.write_bit(ca.counter_clockwise);
                     }
                     BoundaryEdge::EllipticArc(ea) => {
