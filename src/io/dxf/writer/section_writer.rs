@@ -26,6 +26,7 @@ use crate::types::{Color, DxfVersion, Handle, LineWeight, Vector3};
 use crate::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
 use super::stream_writer::{DxfStreamWriter, DxfStreamWriterExt};
+use crate::io::dxf::EMBEDDED_LAYOUT_GROUP;
 use std::collections::{HashMap, HashSet};
 
 /// Sanitize a symbol table record name: strip control characters and
@@ -282,6 +283,9 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     named_handles: HashSet<Handle>,
     /// Write the private records of a DWG to DXF to DWG bridge (see `DxfWriter::for_dwg_bridge`).
     dwg_bridge: bool,
+    /// The release of the document being written: the layout of the embedded DWG binary entities
+    /// of a bridge, whatever release the DXF declares.
+    document_version: DxfVersion,
 }
 
 impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
@@ -310,6 +314,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             keep_heavy_polylines: false,
             named_handles: HashSet::new(),
             dwg_bridge: false,
+            document_version: DxfVersion::Unknown,
         }
     }
 
@@ -317,6 +322,35 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     /// bytes and the dynamic block purge preventer. Call this before [`Self::build_valid_handles`].
     pub fn set_dwg_bridge(&mut self, bridge: bool) {
         self.dwg_bridge = bridge;
+    }
+
+    pub fn set_document_version(&mut self, version: DxfVersion) {
+        self.document_version = version;
+    }
+
+    /// The release whose DWG layout encodes an embedded binary entity. A bridge uses the release
+    /// of the document and records it in group 455, so the reader decodes the bytes with the same
+    /// layout whatever release a host declares for the file; a normal DXF holds them as its own
+    /// release does.
+    fn embedded_layout(&self) -> DxfVersion {
+        if self.dwg_bridge && self.document_version != DxfVersion::Unknown {
+            self.document_version
+        } else {
+            self.dxf_version
+        }
+    }
+
+    /// Group 455 after the bytes of an embedded entity (DWG bridge only).
+    fn write_embedded_layout(&mut self, layout: DxfVersion) -> Result<()> {
+        if !self.dwg_bridge {
+            return Ok(());
+        }
+        let number = layout
+            .to_dxf_string()
+            .trim_start_matches("AC")
+            .parse::<i32>()
+            .unwrap_or(0);
+        self.writer.write_i32(EMBEDDED_LAYOUT_GROUP, number)
     }
 
     /// Keep a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of down-saving it to LWPOLYLINE.
@@ -3834,11 +3868,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(70, 1)?;
             return self.write_acis_data(acis_data);
         }
+        let layout = self.embedded_layout();
         let encoded = crate::io::dwg::embedded_entity::encode_embedded_entity(
             entity,
-            crate::io::dwg::DwgVersion::from_dxf_version(self.dxf_version)
+            crate::io::dwg::DwgVersion::from_dxf_version(layout)
                 .unwrap_or(crate::io::dwg::DwgVersion::AC24),
-            self.dxf_version,
+            layout,
         );
         self.writer.write_i32(type_code, encoded.type_code)?;
         self.writer
@@ -3846,7 +3881,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         for chunk in encoded.bytes.chunks(127) {
             self.writer.write_binary(310, chunk)?;
         }
-        Ok(())
+        self.write_embedded_layout(layout)
     }
 
     fn write_dynamic_block_object_dxf(&mut self, object: &DynamicBlockObject) -> Result<()> {
@@ -11635,13 +11670,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(70, 1)?;
             return self.write_acis_data(acis_data);
         }
-        let dwg_version = crate::io::dwg::DwgVersion::from_dxf_version(self.dxf_version)
+        let layout = self.embedded_layout();
+        let dwg_version = crate::io::dwg::DwgVersion::from_dxf_version(layout)
             .unwrap_or(crate::io::dwg::DwgVersion::AC24);
-        let encoded = crate::io::dwg::embedded_entity::encode_embedded_entity(
-            entity,
-            dwg_version,
-            self.dxf_version,
-        );
+        let encoded =
+            crate::io::dwg::embedded_entity::encode_embedded_entity(entity, dwg_version, layout);
         let bit_length = if exact_bits {
             encoded.bit_length
         } else {
@@ -11652,7 +11685,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         for chunk in encoded.bytes.chunks(127) {
             self.writer.write_binary(310, chunk)?;
         }
-        Ok(())
+        self.write_embedded_layout(layout)
     }
 
     fn write_acis_data(&mut self, acis: &AcisData) -> Result<()> {

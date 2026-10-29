@@ -360,6 +360,7 @@ impl<'a> DxfWriter<'a> {
         section_writer.set_version(output_version);
         section_writer.set_keep_heavy_polylines(self.keep_heavy_polylines);
         section_writer.set_dwg_bridge(self.dwg_bridge);
+        section_writer.set_document_version(document.version);
         section_writer.build_valid_handles(document);
 
         // Write all sections

@@ -1483,6 +1483,21 @@ fn dynamic_dxf_history_base(fields: &DynamicDxfFields) -> SolidHistoryNodeBase {
     }
 }
 
+/// The release whose DWG layout encodes the embedded entities of a record: group 455 of the
+/// section when it has one (the DXF of a DWG bridge), else the declared release.
+fn embedded_layout_of(
+    fields: &DynamicDxfFields,
+    section: &str,
+    declared: DxfVersion,
+) -> DxfVersion {
+    fields
+        .values(section, crate::io::dxf::EMBEDDED_LAYOUT_GROUP)
+        .first()
+        .map_or(declared, |value| {
+            crate::io::dxf::embedded_layout_version(value, declared)
+        })
+}
+
 fn dynamic_dxf_history_sweep(
     fields: &DynamicDxfFields,
     dxf_version: DxfVersion,
@@ -1546,6 +1561,7 @@ fn dynamic_dxf_history_sweep(
             _ => {}
         }
     }
+    let dxf_version = embedded_layout_of(fields, section, dxf_version);
     let dwg_version = crate::io::dwg::DwgVersion::from_dxf_version(dxf_version)
         .unwrap_or(crate::io::dwg::DwgVersion::AC24);
     let [sweep_entity, path_entity] = [0, 1].map(|index| {
@@ -4818,6 +4834,7 @@ impl<'a> SectionReader<'a> {
             ),
             "ACSH_LOFT_CLASS" => {
                 let section = "AcDbShLoft";
+                let dxf_version = embedded_layout_of(&fields, section, dxf_version);
                 let dwg_version = crate::io::dwg::DwgVersion::from_dxf_version(dxf_version)
                     .unwrap_or(crate::io::dwg::DwgVersion::AC24);
                 // Each body is its type (93 section, 96 guide, 98 path), its
@@ -4901,6 +4918,7 @@ impl<'a> SectionReader<'a> {
                 for value in fields.values(section, 310) {
                     append_hex_bytes(&mut binary, value);
                 }
+                let dxf_version = embedded_layout_of(&fields, section, dxf_version);
                 let dwg_version = crate::io::dwg::DwgVersion::from_dxf_version(dxf_version)
                     .unwrap_or(crate::io::dwg::DwgVersion::AC24);
                 let sweep_entity = crate::io::dwg::embedded_entity::decode_embedded_entity(
@@ -19916,6 +19934,8 @@ impl<'a> SectionReader<'a> {
         let mut loft_options_seen = false;
         let mut proxy_graphics_size = 0usize;
         let mut proxy_graphics = Vec::new();
+        // The release whose DWG layout encodes the embedded entities (group 455 of a DWG bridge).
+        let mut embedded_layout = dxf_version;
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -19924,6 +19944,11 @@ impl<'a> SectionReader<'a> {
             }
             if pair.code == 100 {
                 subclass = pair.value_string.clone();
+                continue;
+            }
+            if pair.code == crate::io::dxf::EMBEDDED_LAYOUT_GROUP {
+                embedded_layout =
+                    crate::io::dxf::embedded_layout_version(&pair.value_string, dxf_version);
                 continue;
             }
             if subclass == "AcDbEntity" {
@@ -20277,6 +20302,8 @@ impl<'a> SectionReader<'a> {
             AcisVersion::Version1
         };
 
+        // From here on `dxf_version` is the release whose DWG layout encodes the embedded entities.
+        let dxf_version = embedded_layout;
         let body_profile = |type_code: i32, sat: &str| {
             (!sat.is_empty()).then(|| EmbeddedEntity::Body {
                 type_code,

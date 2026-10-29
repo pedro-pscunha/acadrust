@@ -36,6 +36,31 @@ pub use writer::{
     SectionWriter,
 };
 
+/// The group after the bytes of an embedded DWG entity in the DXF of a DWG bridge (acadrust
+/// private, not in the DXF Reference): the release whose DWG layout encodes them, as the number of
+/// its `$ACADVER` (1032 for AC1032). A host can declare another release for the file, so the
+/// reader takes the layout from this group and falls back to the declared release for a DXF that
+/// has none.
+pub(crate) const EMBEDDED_LAYOUT_GROUP: i32 = 455;
+
+/// The release a group 455 value names, or `declared` when the value names none.
+pub(crate) fn embedded_layout_version(
+    value: &str,
+    declared: crate::types::DxfVersion,
+) -> crate::types::DxfVersion {
+    match value.trim().parse::<i32>() {
+        Ok(number) => {
+            let version = crate::types::DxfVersion::from_version_string(&format!("AC{number}"));
+            if version == crate::types::DxfVersion::Unknown {
+                declared
+            } else {
+                version
+            }
+        }
+        Err(_) => declared,
+    }
+}
+
 pub(crate) fn split_color_book_name(value: &str) -> (Option<String>, Option<String>) {
     let optional = |value: &str| (!value.is_empty()).then(|| value.to_string());
     match value.split_once('$') {
