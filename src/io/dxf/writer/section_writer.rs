@@ -70,6 +70,88 @@ fn is_unrestorable_assoc_object(type_name: &str) -> bool {
 /// Subclass marker of the private raw DWG object record of a DWG bridge.
 pub(crate) const RAW_DWG_OBJECT_SUBCLASS: &str = "AcDbAcadrustRawDwgObject";
 
+/// The DWG bytes, the handle-bit count and the source version of an object that exists only as
+/// DWG bytes and has no DXF form.
+fn raw_dwg_parts(object: &ObjectType) -> Option<(&[u8], i64, Option<DxfVersion>)> {
+    match object {
+        ObjectType::Arch(object) if object.raw_dxf_codes.is_none() => Some((
+            object.raw_dwg_data.as_deref()?,
+            object.raw_dwg_handle_bits,
+            object.raw_dwg_version,
+        )),
+        ObjectType::Unknown {
+            raw_dxf_codes: None,
+            raw_dwg_data: Some(data),
+            raw_dwg_handle_bits,
+            raw_dwg_version,
+            type_name,
+            ..
+        } if !is_unrestorable_assoc_object(type_name) => {
+            Some((data.as_slice(), *raw_dwg_handle_bits, *raw_dwg_version))
+        }
+        _ => None,
+    }
+}
+
+/// The EED of a raw DWG record as XDATA, and what could not be carried. A DWG names an
+/// application by the handle of its APPID, which a host that renumbers handles changes, so a
+/// bridge writes each block as the XDATA record of the application's name and the DWG writer
+/// encodes it again from the APPID the file holds then.
+pub(crate) struct RawDwgEed {
+    pub xdata: ExtendedData,
+    /// One text per block that is not carried: its application is not in the file, or its bytes
+    /// are not a list of XDATA items.
+    pub dropped: Vec<String>,
+}
+
+pub(crate) fn raw_dwg_eed(
+    document: &CadDocument,
+    object: &ObjectType,
+    default_version: DxfVersion,
+) -> Option<RawDwgEed> {
+    let (data, bits, version) = raw_dwg_parts(object)?;
+    let version = version.unwrap_or(default_version);
+    let blocks = DwgObjectWriter::raw_record_eed(data, bits, version)?;
+    let mut eed = RawDwgEed {
+        xdata: ExtendedData::default(),
+        dropped: Vec::new(),
+    };
+    for (application, bytes) in blocks {
+        let Some(app) = document
+            .app_ids
+            .iter()
+            .find(|app| app.handle.value() == application)
+        else {
+            eed.dropped.push(format!(
+                "EED block of the application with handle {application:X}, which the file does not hold"
+            ));
+            continue;
+        };
+        let values = crate::io::dwg::eed_codec::decode_values(
+            &bytes,
+            version >= DxfVersion::AC1021,
+            |handle| {
+                document
+                    .layers
+                    .iter()
+                    .find(|layer| layer.handle.value() == handle)
+                    .map(|layer| layer.name.clone())
+            },
+        );
+        let Some(values) = values else {
+            eed.dropped.push(format!(
+                "EED block of the application {} that is not a list of XDATA items",
+                app.name
+            ));
+            continue;
+        };
+        let mut record = ExtendedDataRecord::new(&app.name);
+        record.values = values;
+        eed.xdata.add_record(record);
+    }
+    Some(eed)
+}
+
 /// What [`SectionWriter::write_raw_dwg_object`] writes besides the bytes.
 struct RawDwgRecord<'a> {
     type_name: &'a str,
@@ -81,6 +163,7 @@ struct RawDwgRecord<'a> {
     version: Option<DxfVersion>,
     handle_bits: i64,
     references: Vec<ProxyObjectReference>,
+    xdata: ExtendedData,
 }
 
 /// Writes all DXF sections
@@ -177,24 +260,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
     /// The handles after the class data of `object`'s DWG bytes, when it has bytes and no DXF form.
     fn raw_dwg_references(&self, object: &ObjectType) -> Option<Vec<ProxyObjectReference>> {
-        let (data, bits, version) = match object {
-            ObjectType::Arch(object) if object.raw_dxf_codes.is_none() => (
-                object.raw_dwg_data.as_deref()?,
-                object.raw_dwg_handle_bits,
-                object.raw_dwg_version,
-            ),
-            ObjectType::Unknown {
-                raw_dxf_codes: None,
-                raw_dwg_data: Some(data),
-                raw_dwg_handle_bits,
-                raw_dwg_version,
-                type_name,
-                ..
-            } if !is_unrestorable_assoc_object(type_name) => {
-                (data.as_slice(), *raw_dwg_handle_bits, *raw_dwg_version)
-            }
-            _ => return None,
-        };
+        let (data, bits, version) = raw_dwg_parts(object)?;
         DwgObjectWriter::raw_record_references(data, bits, version.unwrap_or(self.dxf_version))
     }
 
@@ -815,12 +881,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             // Neither the DXF Reference nor the DXF of AutoCAD 2018 has the four zero
             // suppression variables, so only a DWG bridge writes them.
             if self.dwg_bridge {
-                self.write_header_variable("$DIMALTMZF", |w| {
-                    w.write_double(40, hdr.dim_alt_mzf)
-                })?;
-                self.write_header_variable("$DIMALTMZS", |w| {
-                    w.write_string(6, &hdr.dim_alt_mzs)
-                })?;
+                self.write_header_variable("$DIMALTMZF", |w| w.write_double(40, hdr.dim_alt_mzf))?;
+                self.write_header_variable("$DIMALTMZS", |w| w.write_string(6, &hdr.dim_alt_mzs))?;
                 self.write_header_variable("$DIMMZF", |w| w.write_double(40, hdr.dim_mzf))?;
                 self.write_header_variable("$DIMMZS", |w| w.write_string(6, &hdr.dim_mzs))?;
             }
@@ -6654,6 +6716,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                             version,
                             handle_bits: obj.raw_dwg_handle_bits,
                             references: self.raw_dwg_references(object).unwrap_or_default(),
+                            xdata: raw_dwg_eed(document, object, self.dxf_version)
+                                .map(|eed| eed.xdata)
+                                .unwrap_or_default(),
                         },
                         data,
                     )?;
@@ -6690,6 +6755,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                             version: *raw_dwg_version,
                             handle_bits: *raw_dwg_handle_bits,
                             references: self.raw_dwg_references(object).unwrap_or_default(),
+                            xdata: raw_dwg_eed(document, object, self.dxf_version)
+                                .map(|eed| eed.xdata)
+                                .unwrap_or_default(),
                         },
                         data,
                     )?;
@@ -10116,8 +10184,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     /// CLASS entry too), then reactors, extension dictionary and owner as in any object, then
     /// the subclass `AcDbAcadrustRawDwgObject` with the class's C++ name (1, an Arch object
     /// only), the handle-bit count (90), the source DWG version (3), the byte count (91) and the
-    /// merged-stream bytes (310 chunks). `DxfReader` reads it back into the raw form the DWG
-    /// writer writes again.
+    /// merged-stream bytes (310 chunks), the references after the class data (92 and pointer
+    /// groups) and the EED of the common header as XDATA. `DxfReader` reads it back into the
+    /// raw form the DWG writer writes again.
     fn write_raw_dwg_object(&mut self, record: &RawDwgRecord, data: &[u8]) -> Result<()> {
         self.writer.write_string(0, record.type_name)?;
         self.writer.write_handle(5, record.handle)?;
@@ -10158,7 +10227,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             };
             self.writer.write_handle(code, reference.handle)?;
         }
-        Ok(())
+        // The EED of the record's common header, as XDATA (see `raw_dwg_eed`).
+        self.write_xdata(&record.xdata)
     }
 
     fn write_unknown_object(

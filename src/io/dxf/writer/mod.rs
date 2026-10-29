@@ -37,7 +37,8 @@ pub(crate) fn dxf_skips_arch_entity(entity: &EntityType) -> bool {
             .is_none_or(|graphics| graphics.is_empty())
 }
 
-/// One Arch record a non-R12 DXF save does not write.
+/// One Arch record, or one EED block of a raw DWG record of a bridge, that a DXF save does not
+/// write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DxfOmission {
     /// Handle of the skipped record.
@@ -54,7 +55,11 @@ pub struct DxfOmission {
 /// and are not listed. Objects and entities with a stored DXF class body are
 /// written as that class. R12 has no proxy entity, so an R12 save still fails
 /// while any Arch record remains.
-pub(crate) fn architecture_omissions(document: &CadDocument, dwg_bridge: bool) -> Vec<DxfOmission> {
+pub(crate) fn architecture_omissions(
+    document: &CadDocument,
+    dwg_bridge: bool,
+    version: crate::types::DxfVersion,
+) -> Vec<DxfOmission> {
     let mut omitted = Vec::new();
     for entity in document.entities() {
         if !dxf_skips_arch_entity(entity) {
@@ -73,10 +78,27 @@ pub(crate) fn architecture_omissions(document: &CadDocument, dwg_bridge: bool) -
         });
     }
     for object in document.objects.values() {
+        // A DWG bridge carries an object that has DWG bytes as a private record, with the EED
+        // blocks it can write as XDATA: the others are listed, one entry per block.
+        if dwg_bridge {
+            if let Some(eed) = section_writer::raw_dwg_eed(document, object, version) {
+                let (handle, name) = match object {
+                    ObjectType::Arch(object) => (object.handle, object.dxf_name.clone()),
+                    ObjectType::Unknown {
+                        handle, type_name, ..
+                    } => (*handle, type_name.clone()),
+                    _ => continue,
+                };
+                omitted.extend(eed.dropped.into_iter().map(|reason| DxfOmission {
+                    handle,
+                    name: name.clone(),
+                    reason,
+                }));
+            }
+        }
         let ObjectType::Arch(object) = object else {
             continue;
         };
-        // A DWG bridge carries an object that has DWG bytes as a private record.
         if object.raw_dxf_codes.is_some() || (dwg_bridge && object.raw_dwg_data.is_some()) {
             continue;
         }
@@ -189,7 +211,11 @@ impl<'a> DxfWriter<'a> {
         if self.version == Some(crate::types::DxfVersion::AC1009) {
             return Vec::new();
         }
-        architecture_omissions(self.document, self.dwg_bridge)
+        architecture_omissions(
+            self.document,
+            self.dwg_bridge,
+            self.version.unwrap_or(self.document.version),
+        )
     }
 
     /// Write to a file

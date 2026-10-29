@@ -15,6 +15,7 @@ use acadrust::objects::{
     BlockRepresentationData, Dictionary, DynamicBlockData, DynamicBlockObject, ObjectType,
 };
 use acadrust::types::{DxfVersion, Handle};
+use acadrust::xdata::XDataValue;
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfWriter};
 
 const AEC: &str = "AECS_DISP_REP_MEMBER_MODEL_DETAIL";
@@ -29,6 +30,7 @@ fn raw_record(
     owner: Handle,
     xdictionary: Option<Handle>,
     target: Handle,
+    eed: &[(Handle, Vec<u8>)],
 ) -> (Vec<u8>, i64) {
     let mut writer = DwgMergedWriter::new(
         DwgVersion::from_dxf_version(doc.version).unwrap(),
@@ -36,6 +38,13 @@ fn raw_record(
     );
     writer.write_object_type(class_number);
     writer.main_mut().write_handle_undefined(handle.value());
+    for (application, bytes) in eed {
+        writer.write_bit_short(bytes.len() as i16);
+        writer
+            .main_mut()
+            .write_handle(DwgReferenceType::HardPointer, application.value());
+        writer.write_bytes(bytes);
+    }
     writer.write_bit_short(0); // EED terminator.
     writer.write_handle(DwgReferenceType::SoftPointer, owner.value());
     writer.write_bit_long(1); // One reactor.
@@ -87,7 +96,7 @@ fn fixture() -> Fixture {
     doc.objects.insert(target, ObjectType::Dictionary(referred));
 
     let number = doc.classes.get_by_name(AEC).unwrap().class_number;
-    let (raw, bits) = raw_record(&doc, number, arch, root, Some(xdictionary), target);
+    let (raw, bits) = raw_record(&doc, number, arch, root, Some(xdictionary), target, &[]);
     let mut object = ArchObject::new(AEC, arch, root);
     object.reactors = vec![root];
     object.xdictionary_handle = Some(xdictionary);
@@ -97,7 +106,7 @@ fn fixture() -> Fixture {
     doc.objects.insert(arch, ObjectType::Arch(object));
 
     let number = doc.classes.get_by_name(UNKNOWN).unwrap().class_number;
-    let (raw, bits) = raw_record(&doc, number, unknown, root, None, target);
+    let (raw, bits) = raw_record(&doc, number, unknown, root, None, target, &[]);
     doc.objects.insert(
         unknown,
         ObjectType::Unknown {
@@ -355,6 +364,151 @@ fn the_dwg_writer_writes_them_again() {
         (root.get("AEC test"), root.get("TAG test")),
         (Some(f.arch), Some(f.unknown))
     );
+}
+
+// ── EED of a raw record ─────────────────────────────────────────────────
+
+const APPLICATION: &str = "AECEED";
+
+/// An EED block (R2007+ encoding) of a string and a short.
+fn eed_bytes() -> Vec<u8> {
+    let units: Vec<u16> = "kept text".encode_utf16().collect();
+    let mut bytes = vec![0];
+    bytes.extend_from_slice(&(units.len() as u16).to_le_bytes());
+    for unit in units {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes.push(70);
+    bytes.extend_from_slice(&7i16.to_le_bytes());
+    bytes
+}
+
+/// The fixture with an APPID (a handle of its own) and an EED block of that application in the
+/// common header of the Arch record; with `registered` false the block names a handle no APPID
+/// has.
+fn with_eed(registered: bool) -> (Fixture, Handle) {
+    let mut f = fixture();
+    let application = f.doc.allocate_handle();
+    if registered {
+        let mut app = acadrust::tables::AppId::new(APPLICATION);
+        app.handle = application;
+        f.doc.app_ids.add(app).expect("add appid");
+    }
+    let number = f.doc.classes.get_by_name(AEC).unwrap().class_number;
+    let (raw, bits) = raw_record(
+        &f.doc,
+        number,
+        f.arch,
+        f.root,
+        Some(f.xdictionary),
+        f.target,
+        &[(application, eed_bytes())],
+    );
+    let Some(ObjectType::Arch(object)) = f.doc.objects.get_mut(&f.arch) else {
+        panic!()
+    };
+    object.raw_dwg_data = Some(raw);
+    object.raw_dwg_handle_bits = bits;
+    (f, application)
+}
+
+fn through_dwg(doc: &CadDocument) -> CadDocument {
+    let bytes = DwgWriter::write_to_vec(doc).expect("write dwg");
+    DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg")
+}
+
+/// The APPID of `name` in `doc` and the values of the object's EED record of that application.
+fn eed_of(doc: &CadDocument, object: Handle, name: &str) -> Option<(Handle, Vec<XDataValue>)> {
+    let record = doc.object_xdata.get(&object)?.get_record(name)?;
+    Some((doc.app_ids.get(name)?.handle, record.values.clone()))
+}
+
+fn eed_values() -> Vec<XDataValue> {
+    vec![
+        XDataValue::String("kept text".to_string()),
+        XDataValue::Integer16(7),
+    ]
+}
+
+#[test]
+fn a_dwg_keeps_the_eed_of_a_raw_record() {
+    let (f, application) = with_eed(true);
+    let back = through_dwg(&f.doc);
+    assert_eq!(
+        eed_of(&back, f.arch, APPLICATION),
+        Some((application, eed_values()))
+    );
+}
+
+#[test]
+fn the_eed_of_a_raw_record_follows_a_renumbered_appid() {
+    let (f, application) = with_eed(true);
+    let dxf = text(DxfWriter::new(&f.doc).for_dwg_bridge());
+    // The EED travels as XDATA of the record, which names the application by name.
+    assert!(
+        dxf.contains("1001\n") || dxf.contains("1001\r\n"),
+        "no XDATA"
+    );
+    let moved = Handle::new(application.value() + 0x5000);
+    let back = read_dxf(renumbered(&dxf, application, moved).into_bytes());
+    assert_eq!(back.app_ids.get(APPLICATION).unwrap().handle, moved);
+    let again = through_dwg(&back);
+    // The DWG names the application the host renumbered, not the stale handle.
+    assert_eq!(
+        eed_of(&again, f.arch, APPLICATION),
+        Some((moved, eed_values()))
+    );
+    assert!(again.app_ids.iter().all(|app| app.handle != application));
+}
+
+/// A host that gives the stale handle of the application to another APPID must not move the
+/// block to that application.
+#[test]
+fn the_eed_of_a_raw_record_does_not_move_to_the_appid_that_takes_the_old_handle() {
+    let (mut f, application) = with_eed(true);
+    let other = f.doc.allocate_handle();
+    let mut app = acadrust::tables::AppId::new("OTHERAPP");
+    app.handle = other;
+    f.doc.app_ids.add(app).expect("add appid");
+    let dxf = text(DxfWriter::new(&f.doc).for_dwg_bridge());
+    let moved = Handle::new(application.value() + 0x5000);
+    let swapped = renumbered(&renumbered(&dxf, application, moved), other, application);
+    let back = read_dxf(swapped.into_bytes());
+    assert_eq!(back.app_ids.get("OTHERAPP").unwrap().handle, application);
+    let again = through_dwg(&back);
+    assert_eq!(
+        eed_of(&again, f.arch, APPLICATION),
+        Some((moved, eed_values()))
+    );
+    assert_eq!(eed_of(&again, f.arch, "OTHERAPP"), None);
+}
+
+#[test]
+fn an_eed_block_of_an_unknown_application_is_dropped_and_reported() {
+    let (f, application) = with_eed(false);
+    let writer = DxfWriter::new(&f.doc).for_dwg_bridge();
+    let omitted = writer.omitted_architecture_records();
+    assert_eq!(omitted.len(), 1, "{omitted:?}");
+    assert_eq!(omitted[0].handle, f.arch);
+    assert!(
+        omitted[0]
+            .reason
+            .contains(&format!("{:X}", application.value())),
+        "{}",
+        omitted[0].reason
+    );
+    let back = through_dwg(&bridged(&f.doc));
+    // The record is there, with no EED naming an application the file does not hold.
+    assert!(matches!(
+        back.objects.get(&f.arch),
+        Some(ObjectType::Arch(_))
+    ));
+    assert!(back
+        .object_xdata
+        .get(&f.arch)
+        .is_none_or(|data| data.records().is_empty()));
 }
 
 // ── DYNAMICBLOCKPURGEPREVENTER ──────────────────────────────────────────

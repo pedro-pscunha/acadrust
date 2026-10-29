@@ -72,6 +72,18 @@ impl DwgObjectWriter<'_> {
             .map(|body| body.references)
     }
 
+    /// The EED blocks (application handle and bytes) in the common header of a raw DWG object
+    /// record, or `None` when the record does not parse as an object body of `version`.
+    pub(crate) fn raw_record_eed(
+        raw: &[u8],
+        handle_bits: i64,
+        version: DxfVersion,
+    ) -> Option<Vec<(u64, Vec<u8>)>> {
+        Self::raw_record_body(raw, handle_bits, version)
+            .ok()
+            .map(|body| body.eed)
+    }
+
     pub(crate) fn validate_architecture_object(
         object: &ArchObject,
         version: DxfVersion,
@@ -83,7 +95,12 @@ impl DwgObjectWriter<'_> {
         let body = Self::architecture_object_body(object, self.dxf_version)
             .expect("Arch object record was validated before writing");
         let type_code = self.class_type_code(&object.dxf_name, body.type_code);
-        let source_eed = if self.document.eed_by_handle.contains_key(&object.handle) {
+        // The EED in the record names applications by the handles of the DWG it came from. A
+        // record a DWG bridge brought back (its references are set) holds that EED as XDATA,
+        // which names the applications by name, so the stale blocks are not written again.
+        let source_eed = if self.document.eed_by_handle.contains_key(&object.handle)
+            || object.raw_dwg_references.is_some()
+        {
             Vec::new()
         } else {
             body.eed

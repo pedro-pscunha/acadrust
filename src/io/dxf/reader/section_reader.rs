@@ -22117,8 +22117,14 @@ impl<'a> SectionReader<'a> {
         // A table style keeps its XDATA in its own groups; the applications other than the
         // annotative flag it holds as a field are kept aside as well, for the DWG writer.
         let table_style = matches!(document.objects.get(&handle), Some(ObjectType::TableStyle(_)));
+        // The XDATA of a raw record of a DWG bridge is the EED of its common header.
+        let raw_bridge_record = matches!(
+            document.objects.get(&handle),
+            Some(ObjectType::Arch(arch)) if arch.raw_dwg_references.is_some()
+        );
         if pairs.is_empty()
             || (!table_style
+                && !raw_bridge_record
                 && document
                     .objects
                     .get(&handle)

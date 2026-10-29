@@ -867,7 +867,10 @@ impl<'a> DwgObjectWriter<'a> {
                 eed.raw_dwg_eed.retain(|(app, _)| *app != app_handle);
             } else {
                 eed.raw_dwg_eed.retain(|(app, _)| *app != app_handle);
-                opaque_extra.push((app_handle, bytes));
+                // A block of an application the file does not hold would name a missing APPID.
+                if application.is_some() {
+                    opaque_extra.push((app_handle, bytes));
+                }
             }
         }
         self.write_extended_data_with(&eed, &opaque_extra);
