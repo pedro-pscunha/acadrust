@@ -5956,6 +5956,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(71, 1)?;
         }
 
+        // The named UCS, the UCS an orthographic UCS is relative to, and the orthographic type.
+        for (code, handle) in [(345, viewport.ucs_handle), (346, viewport.base_ucs_handle)] {
+            if self.header_pointer_is_written(handle) {
+                self.writer.write_handle(code, handle)?;
+            }
+        }
+        if viewport.ucs_ortho_type != 0 {
+            self.writer.write_i16(79, viewport.ucs_ortho_type)?;
+        }
+
         // UCS origin, axes
         if viewport.ucs_origin != Vector3::ZERO {
             self.writer.write_double(110, viewport.ucs_origin.x)?;

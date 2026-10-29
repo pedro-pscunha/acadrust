@@ -17882,10 +17882,17 @@ impl<'a> SectionReader<'a> {
                         vp.default_lighting_type = v;
                     }
                 }
-                332 | 333 | 348 | 361 => {
+                79 => {
+                    if let Some(v) = pair.as_i16() {
+                        vp.ucs_ortho_type = v;
+                    }
+                }
+                332 | 333 | 345 | 346 | 348 | 361 => {
                     if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
                         let handle = Handle::new(h);
                         match pair.code {
+                            345 => vp.ucs_handle = handle,
+                            346 => vp.base_ucs_handle = handle,
                             332 => vp.background_handle = handle,
                             333 => vp.shade_plot_handle = handle,
                             348 => vp.visual_style_handle = handle,
