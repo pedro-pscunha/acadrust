@@ -4570,7 +4570,15 @@ impl<'a> SectionReader<'a> {
                     object.owner = parse_dxf_handle(&pair.value_string);
                     owner_seen = true;
                 }
-                100 => section = pair.value_string.clone(),
+                // AutoCAD spells the markers of the look-up parameter and grip with a capital U;
+                // the fields are kept under the spelling of the C++ class names.
+                100 => {
+                    section = match pair.value_string.as_str() {
+                        "AcDbBlockLookUpParameter" => "AcDbBlockLookupParameter".to_string(),
+                        "AcDbBlockLookUpGrip" => "AcDbBlockLookupGrip".to_string(),
+                        other => other.to_string(),
+                    }
+                }
                 _ => fields
                     .sections
                     .entry(section.clone())

@@ -3510,10 +3510,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         code: i32,
         name_code: i32,
     ) -> Result<()> {
+        // AutoCAD writes each connection as its code and then its name (92, 301, 93, 302).
         for (index, value) in values.iter().enumerate() {
             self.writer.write_i32(code + index as i32, value.code)?;
-        }
-        for (index, value) in values.iter().enumerate() {
             self.writer
                 .write_string(name_code + index as i32, &value.name)?;
         }
@@ -3910,8 +3909,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(141, value.orientation.y)?;
                 self.writer.write_double(142, value.orientation.z)?;
             }
-            DynamicBlockData::LookupGrip(value)
-            | DynamicBlockData::PolarGrip(value)
+            DynamicBlockData::LookupGrip(value) => {
+                self.write_dynamic_grip_dxf(value)?;
+                // The marker has a capital U, unlike the C++ class name of the CLASSES section.
+                self.writer.write_subclass("AcDbBlockLookUpGrip")?;
+            }
+            DynamicBlockData::PolarGrip(value)
             | DynamicBlockData::RotationGrip(value)
             | DynamicBlockData::VisibilityGrip(value)
             | DynamicBlockData::XYGrip(value)
@@ -3953,10 +3956,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             }
             DynamicBlockData::LookupParameter(value) => {
                 self.write_dynamic_one_point_dxf(&value.parameter)?;
-                self.writer.write_subclass("AcDbBlockLookupParameter")?;
-                self.writer.write_i32(94, value.index)?;
+                // AutoCAD spells the marker with a capital U and orders the groups 303, 304, 94.
+                self.writer.write_subclass("AcDbBlockLookUpParameter")?;
                 self.writer.write_string(303, &value.lookup_name)?;
                 self.writer.write_string(304, &value.lookup_description)?;
+                self.writer.write_i32(94, value.index)?;
             }
             DynamicBlockData::PointParameter(value) => {
                 self.write_dynamic_one_point_dxf(&value.parameter)?;
