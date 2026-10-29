@@ -17198,6 +17198,7 @@ impl<'a> SectionReader<'a> {
         let mut default_value = String::new();
         let mut insertion_point = PointReader::new();
         let mut height = 0.0;
+        let mut thickness = 0.0;
         let mut rotation = 0.0;
         let mut layer = String::from("0");
         let mut color = Color::ByLayer;
@@ -17311,6 +17312,11 @@ impl<'a> SectionReader<'a> {
                         );
                     }
                 }
+                39 => {
+                    if let Some(v) = pair.as_double() {
+                        thickness = v;
+                    }
+                }
                 40 => {
                     if let Some(h) = pair.as_double() {
                         height = h;
@@ -17345,6 +17351,7 @@ impl<'a> SectionReader<'a> {
 
         let mut attdef = AttributeDefinition::new(tag, prompt, default_value);
         attdef.insertion_point = insertion_point.get_point().unwrap_or(Vector3::zero());
+        attdef.thickness = thickness;
         attdef.height = height;
         attdef.rotation = rotation;
         attdef.lock_position = lock_position;
@@ -18175,6 +18182,11 @@ impl<'a> SectionReader<'a> {
                 }
                 11 | 21 | 31 => {
                     alignment_point.add_coordinate(&pair);
+                }
+                39 => {
+                    if let Some(v) = pair.as_double() {
+                        attrib.thickness = v;
+                    }
                 }
                 40 => {
                     if let Some(v) = pair.as_double() {

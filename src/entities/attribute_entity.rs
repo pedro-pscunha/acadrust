@@ -63,6 +63,8 @@ pub struct AttributeEntity {
     pub field_length: i16,
     /// Extrusion direction
     pub normal: Vector3,
+    /// Thickness along the extrusion direction (DXF 39; DWG text data)
+    pub thickness: f64,
     /// Multiline text flag
     pub mtext_flag: MTextFlag,
     /// Is this really a multiline attribute
@@ -100,6 +102,7 @@ impl AttributeEntity {
             flags: AttributeFlags::default(),
             field_length: 0,
             normal: Vector3::UNIT_Z,
+            thickness: 0.0,
             mtext_flag: MTextFlag::SingleLine,
             is_multiline: false,
             line_count: 1,
@@ -142,6 +145,7 @@ impl AttributeEntity {
             flags: attdef.flags,
             field_length: attdef.field_length,
             normal: attdef.normal,
+            thickness: attdef.thickness,
             mtext_flag: attdef.mtext_flag,
             is_multiline: attdef.is_multiline,
             line_count: attdef.line_count,

@@ -5194,6 +5194,7 @@ impl DwgDocumentBuilder {
                     e.width_factor = data.text_data.width_factor;
                     e.oblique_angle = data.text_data.oblique_angle;
                     e.normal = data.text_data.normal;
+                    e.thickness = data.text_data.thickness;
                     e.text_style = maps.style_name(data.text_data.style_handle);
                     e.flags = AttributeFlags::from_bits(data.flags as i32);
                     e.text_generation_flags = data.text_data.generation;
@@ -5249,6 +5250,7 @@ impl DwgDocumentBuilder {
                     e.width_factor = data.text_data.width_factor;
                     e.oblique_angle = data.text_data.oblique_angle;
                     e.normal = data.text_data.normal;
+                    e.thickness = data.text_data.thickness;
                     e.text_style = maps.style_name(data.text_data.style_handle);
                     // Carry the flag byte the reader parsed. Dropping it left
                     // `flags.invisible` false, so an attribute tagged invisible
