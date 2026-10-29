@@ -1,4 +1,5 @@
-//! $STYLESHEET (group 7) names the plot style table file of a drawing. The DWG header holds it
+//! $STYLESHEET (group 1, as the DXF Reference and AutoCAD have it) names the plot style table file
+//! of a drawing. The DWG header holds it
 //! and the DXF reader reads it, but the DXF writer left it out, so a drawing that went DWG, DXF,
 //! DWG came back without its plot style table.
 
@@ -21,7 +22,7 @@ fn the_plot_style_table_name_survives_dxf_to_dwg() {
             .unwrap_or_else(|| panic!("{version:?}: no $STYLESHEET"));
         assert_eq!(
             &lines[at + 2..at + 4],
-            ["7", "monochrome.ctb"],
+            ["1", "monochrome.ctb"],
             "{version:?}"
         );
         let bridged = DxfReader::from_reader(Cursor::new(dxf))
@@ -37,5 +38,21 @@ fn the_plot_style_table_name_survives_dxf_to_dwg() {
             .read()
             .expect("read dwg");
         assert_eq!(back.header.stylesheet, "monochrome.ctb", "{version:?}: DWG");
+    }
+}
+
+/// An earlier acadrust build wrote group 7, which AutoCAD refuses ("error 50 in the header"): the
+/// reader still takes it.
+#[test]
+fn the_reader_takes_the_earlier_group_7_too() {
+    for group in ["1", "7"] {
+        let text = format!(
+            "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$STYLESHEET\n{group}\nmonochrome.ctb\n0\nENDSEC\n0\nEOF\n"
+        );
+        let doc = DxfReader::from_reader(Cursor::new(text.into_bytes()))
+            .expect("reader")
+            .read()
+            .expect("read dxf");
+        assert_eq!(doc.header.stylesheet, "monochrome.ctb", "group {group}");
     }
 }
