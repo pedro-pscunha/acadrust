@@ -420,7 +420,7 @@ fn drop_references_from(common: &mut EntityCommon, gone: &HashSet<Handle>) {
 }
 
 /// Take the records in `gone` out of what the rest of the document names: entities (and the
-/// attributes of an INSERT), objects with reactors, the extension dictionary of an Arch object, the
+/// attributes of an INSERT and the child records of a polyline), objects with reactors, the extension dictionary of an Arch object, the
 /// side tables of reactors and extension dictionaries, and the plot style and material of a layer.
 /// An entity that names none of them keeps its verbatim record.
 fn drop_references_to(document: &mut CadDocument, gone: &HashSet<Handle>) {
@@ -430,6 +430,9 @@ fn drop_references_to(document: &mut CadDocument, gone: &HashSet<Handle>) {
             names_a_record_in(entity.common(), gone)
                 || matches!(entity, crate::entities::EntityType::Insert(insert)
                     if insert.attributes.iter().any(|a| names_a_record_in(&a.common, gone)))
+                || crate::entities::polyline::child_commons(entity)
+                    .into_iter()
+                    .any(|child| names_a_record_in(child, gone))
         })
         .map(|entity| entity.common().handle)
         .collect();
@@ -442,6 +445,10 @@ fn drop_references_to(document: &mut CadDocument, gone: &HashSet<Handle>) {
             for attribute in &mut insert.attributes {
                 drop_references_from(&mut attribute.common, gone);
             }
+        }
+        // The VERTEX, face and SEQEND records of a polyline have common data of their own.
+        for child in crate::entities::polyline::child_commons_mut(entity) {
+            drop_references_from(child, gone);
         }
     }
     for object in document.objects.values_mut() {

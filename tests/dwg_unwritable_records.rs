@@ -172,3 +172,120 @@ fn what_is_left_names_no_omitted_record() {
     };
     assert!(!root.reactors.contains(&omitted), "dictionary reactors");
 }
+
+/// Common data that names the record the save leaves out as a reactor and as its plot style, and
+/// the root dictionary as a reactor that stays.
+fn naming(handle: Handle, omitted: Handle, root: Handle) -> acadrust::entities::EntityCommon {
+    let mut common = acadrust::entities::EntityCommon::new();
+    common.handle = handle;
+    common.reactors = vec![omitted, root];
+    common.plotstyle_flags = 3;
+    common.plotstyle_handle = Some(omitted);
+    common
+}
+
+/// What a child record keeps of the references: its reactors and plot style.
+type Kept = (Vec<Handle>, u8, Option<Handle>);
+
+fn kept(common: &acadrust::entities::EntityCommon) -> Kept {
+    (
+        common.reactors.clone(),
+        common.plotstyle_flags,
+        common.plotstyle_handle,
+    )
+}
+
+fn written_back(doc: &CadDocument) -> CadDocument {
+    let (bytes, report) = DwgWriter::write_to_vec_omitting_unwritable(doc)
+        .expect("an omitted record stopped the save");
+    assert_eq!(report.len(), 1);
+    DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg")
+}
+
+#[test]
+fn the_children_of_a_2d_polyline_name_no_omitted_record() {
+    use acadrust::entities::{Polyline2D, Vertex2D};
+    let mut doc = CadDocument::new();
+    let root = doc.header.named_objects_dict_handle;
+    let omitted = doc.allocate_handle();
+    doc.objects.insert(
+        omitted,
+        ObjectType::Arch(ArchObject::new("AEC_WALL_STYLE", omitted, root)),
+    );
+    let mut polyline = Polyline2D::new();
+    for x in 0..3 {
+        let mut vertex = Vertex2D::new(Vector3::new(f64::from(x) * 10.0, 0.0, 0.0));
+        vertex.handle = doc.allocate_handle();
+        if x == 1 {
+            vertex.common = Some(Box::new(naming(vertex.handle, omitted, root)));
+        }
+        polyline.add_vertex(vertex);
+    }
+    let seqend = doc.allocate_handle();
+    polyline.seqend = Some(Box::new(naming(seqend, omitted, root)));
+    doc.add_entity(EntityType::Polyline2D(polyline))
+        .expect("add polyline");
+
+    let back = written_back(&doc);
+    let polyline = back
+        .entities()
+        .find_map(|e| match e {
+            EntityType::Polyline2D(p) => Some(p),
+            _ => None,
+        })
+        .expect("the polyline is written");
+    let vertex = polyline.vertices[1].common.as_deref().expect("vertex data");
+    assert_eq!(kept(vertex), (vec![root], 0, None), "VERTEX");
+    let seqend = polyline.seqend.as_deref().expect("seqend");
+    assert_eq!(kept(seqend), (vec![root], 0, None), "SEQEND");
+}
+
+#[test]
+fn the_children_of_a_polyface_mesh_name_no_omitted_record() {
+    use acadrust::entities::{PolyfaceFace, PolyfaceMesh};
+    let mut doc = CadDocument::new();
+    let root = doc.header.named_objects_dict_handle;
+    let omitted = doc.allocate_handle();
+    doc.objects.insert(
+        omitted,
+        ObjectType::Arch(ArchObject::new("AEC_WALL_STYLE", omitted, root)),
+    );
+    let mut mesh = PolyfaceMesh::new();
+    for (x, y) in [(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)] {
+        mesh.add_vertex_xyz(x, y, 0.0);
+    }
+    mesh.add_face(PolyfaceFace::triangle(1, 2, 3));
+    let (vertex, face, seqend) = (
+        doc.allocate_handle(),
+        doc.allocate_handle(),
+        doc.allocate_handle(),
+    );
+    mesh.vertices[0].common = naming(vertex, omitted, root);
+    mesh.faces[0].common = naming(face, omitted, root);
+    mesh.seqend_handle = Some(seqend);
+    mesh.seqend = Some(Box::new(naming(seqend, omitted, root)));
+    doc.add_entity(EntityType::PolyfaceMesh(mesh))
+        .expect("add mesh");
+
+    let back = written_back(&doc);
+    let mesh = back
+        .entities()
+        .find_map(|e| match e {
+            EntityType::PolyfaceMesh(m) => Some(m),
+            _ => None,
+        })
+        .expect("the mesh is written");
+    assert_eq!(
+        kept(&mesh.vertices[0].common),
+        (vec![root], 0, None),
+        "VERTEX"
+    );
+    assert_eq!(kept(&mesh.faces[0].common), (vec![root], 0, None), "face");
+    assert_eq!(
+        kept(mesh.seqend.as_deref().expect("seqend")),
+        (vec![root], 0, None),
+        "SEQEND"
+    );
+}
