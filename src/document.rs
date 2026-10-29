@@ -1230,6 +1230,19 @@ pub struct Preview {
     pub data: Vec<u8>,
 }
 
+/// A layout thumbnail of the AcDs data store (`AcDb_Thumbnail_Schema`, property
+/// `Thumbnail_Data`): a PNG owned by the layout whose handle is `owner`. The DWG
+/// stores it in the `AcDb:AcDsPrototype_1b` section, the DXF in an `ACDSRECORD`
+/// of the `ACDSDATA` section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AcDsThumbnail {
+    /// Handle of the layout that owns the thumbnail.
+    pub owner: Handle,
+    /// The PNG image, exactly as stored.
+    pub png: Vec<u8>,
+}
+
 /// A decoded `AcDbField` definition (a dynamic text field).
 ///
 /// `evaluator` is the field's evaluator id (DXF 1) — e.g. `"AcVar"` or
@@ -1426,6 +1439,10 @@ pub struct CadDocument {
     /// file's preview section; the DWG writer embeds it when `Some` and emits an
     /// empty preview when `None`. Not part of DXF.
     pub preview: Option<Preview>,
+
+    /// Layout thumbnails of the AcDs data store, in file order. Read from the DWG
+    /// AcDs section and the DXF `ACDSDATA` section; both writers emit them.
+    pub acds_thumbnails: Vec<AcDsThumbnail>,
 
     /// Modeler-entity handles (3DSOLID/REGION/BODY/SURFACE) whose geometry is
     /// stored as SAB blobs in the `AcDb:AcDsPrototype_1b` data-store section,
@@ -1647,6 +1664,7 @@ impl CadDocument {
             block_entity_handles: HashMap::new(),
             dwg_source_version: None,
             preview: None,
+            acds_thumbnails: Vec::new(),
             acis_sab_handles: Vec::new(),
             raw_acds_data: None,
             r12_header_raw: None,
@@ -5666,6 +5684,9 @@ impl CadDocument {
                     *handle = *new_handle;
                 }
             };
+            for thumbnail in &mut self.acds_thumbnails {
+                remap_object_handle(&mut thumbnail.owner);
+            }
 
             // Update dictionary entry values that reference remapped handles
             for (_, obj) in self.objects.iter_mut() {

@@ -538,6 +538,60 @@ fn extract_acds_record_blobs(buf: &[u8], modeler_handles: &HashSet<u64>) -> Vec<
     out
 }
 
+/// The PNG magic number that opens every layout thumbnail of the AcDs section.
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// The layout thumbnails (`AcDb_Thumbnail_Schema`, `Thumbnail_Data`) of a decompressed AcDs
+/// section, in file order.
+///
+/// A `_data_` segment holds a table of 20-byte entries `col0(0x14) revision handle(8) offset`,
+/// and each entry's value sits at `base + offset` as a length (u32) followed by that many bytes
+/// (`base` is the aligned start of the value area, `segment + 16 * the align field`). A value
+/// that opens with the PNG magic number is a thumbnail owned by the entry's handle.
+pub(crate) fn extract_acds_thumbnails(buf: &[u8]) -> Vec<crate::document::AcDsThumbnail> {
+    let rd32 = |p: usize| -> Option<u32> {
+        buf.get(p..p + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+    };
+    let rd64 = |p: usize| -> Option<u64> {
+        buf.get(p..p + 8)
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+    };
+    let marker = [0xACu8, 0xD5, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x5F]; // "\xAC\xD5_data_"
+    let mut out = Vec::new();
+    let mut scan = 0;
+    while let Some(i) = buf[scan..].windows(8).position(|w| w == marker) {
+        let seg = scan + i;
+        scan = seg + 8;
+        let (Some(size), Some(align)) = (rd64(seg + 16), rd32(seg + 36)) else {
+            continue;
+        };
+        let seg_end = seg.saturating_add(size as usize).min(buf.len());
+        let base = seg.saturating_add(align as usize * 16);
+        let mut p = seg + 48;
+        while p + 20 <= seg_end && rd32(p) == Some(0x14) {
+            let (Some(handle), Some(offset)) = (rd64(p + 8), rd32(p + 16)) else {
+                break;
+            };
+            p += 20;
+            let at = base.saturating_add(offset as usize);
+            let Some(length) = rd32(at).map(|length| length as usize) else {
+                continue;
+            };
+            let Some(png) = buf.get(at + 4..at.saturating_add(4).saturating_add(length)) else {
+                continue;
+            };
+            if png.starts_with(PNG_MAGIC) {
+                out.push(crate::document::AcDsThumbnail {
+                    owner: crate::Handle::new(handle),
+                    png: png.to_vec(),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Extract every SAB (ACIS/ASM binary) blob from a decompressed AcDs section, in
 /// the order they appear — the `_data_` record order, matching the handle list
 /// order they appear.
@@ -1580,6 +1634,7 @@ impl<R: Read + Seek> DwgReader<R> {
                 (!acis.sab_data.is_empty())
                     .then_some((entity.common().handle, acis.sab_data.as_slice()))
             }));
+            document.acds_thumbnails = extract_acds_thumbnails(&acds_buf);
             document.raw_acds_data = Some(std::sync::Arc::new(acds_buf));
             document.raw_acds_fingerprint = fingerprint;
             if attached > 0 {

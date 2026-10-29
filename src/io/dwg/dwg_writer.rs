@@ -1407,10 +1407,21 @@ fn acds_data<'a>(
     if document.dwg_source_version == Some(version) && fingerprint == document.raw_acds_fingerprint
     {
         if let Some(raw) = document.raw_acds_data.as_deref() {
-            return std::borrow::Cow::Borrowed(raw.as_slice());
+            // The thumbnails are not in the fingerprint: reuse the section only while it still
+            // holds the thumbnails of the document.
+            if super::dwg_reader::extract_acds_thumbnails(raw) == document.acds_thumbnails {
+                return std::borrow::Cow::Borrowed(raw.as_slice());
+            }
         }
     }
-    std::borrow::Cow::Owned(build_acds_prototype(sab_entries))
+    std::borrow::Cow::Owned(build_acds_prototype(
+        sab_entries,
+        if version >= DxfVersion::AC1027 {
+            &document.acds_thumbnails
+        } else {
+            &[]
+        },
+    ))
 }
 
 /// Whether the version uses the AC21 (R2007) file format.
@@ -2119,6 +2130,7 @@ fn write_ac18<W: Write + Seek>(
 
     // ── Section: AcDsPrototype_1b (AC1027+ ACIS SAB storage) ──
     if !sab_entries.is_empty()
+        || (version >= DxfVersion::AC1027 && !document.acds_thumbnails.is_empty())
         || (document.dwg_source_version == Some(version) && document.raw_acds_data.is_some())
     {
         let acds_data = acds_data(document, version, &sab_entries);
@@ -2244,6 +2256,7 @@ fn write_ac21_impl<W: Write + Seek>(
 
     // AcDsPrototype_1b (AC1027+ ACIS SAB storage)
     if !sab_entries.is_empty()
+        || (version >= DxfVersion::AC1027 && !document.acds_thumbnails.is_empty())
         || (document.dwg_source_version == Some(version) && document.raw_acds_data.is_some())
     {
         let acds_data = acds_data(document, version, &sab_entries);
@@ -2497,17 +2510,35 @@ fn build_rev_history() -> Vec<u8> {
 ///   `marker[8] + id[4] + pad[4] + size[8] + records[8] + meta[8] + fill[8]`
 ///
 /// Segments are padded with 0x70 bytes to 16-byte alignment.
-fn build_acds_prototype(sab_entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
-    if sab_entries.is_empty() {
+fn build_acds_prototype(
+    sab_entries: &[(Handle, Vec<u8>)],
+    thumbnails: &[crate::document::AcDsThumbnail],
+) -> Vec<u8> {
+    if sab_entries.is_empty() && thumbnails.is_empty() {
         return Vec::new();
     }
 
-    // ── Segment 1: _data_ id=2 (SAB data records, one per ACIS entity) ──
-    let data2 = build_acds_data2_segment(sab_entries);
+    // The thumbnail records sit in their own `_data_` segment (id=3) next to the SAB records
+    // (id=2). A file without SAB records holds the thumbnails in the first `_data_` segment and
+    // keeps the empty boilerplate as the second.
+    let thumbnail_entries: Vec<(Handle, Vec<u8>)> = thumbnails
+        .iter()
+        .map(|thumbnail| (thumbnail.owner, thumbnail.png.clone()))
+        .collect();
+    let (data2, data3_records): (Vec<u8>, Option<Vec<u8>>) = if sab_entries.is_empty() {
+        (build_acds_data_segment(2, &thumbnail_entries), None)
+    } else if thumbnail_entries.is_empty() {
+        (build_acds_data_segment(2, sab_entries), None)
+    } else {
+        (
+            build_acds_data_segment(2, sab_entries),
+            Some(build_acds_data_segment(3, &thumbnail_entries)),
+        )
+    };
 
-    // ── Segment 2: _data_ id=3 (thumbnail, empty boilerplate) ─────
+    // ── Segment 2: _data_ id=3 (thumbnail records, or empty boilerplate) ─────
     #[rustfmt::skip]
-    let data3: &[u8] = &[
+    let boilerplate: &[u8] = &[
         0xAC, 0xD5, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x5F, // marker "_data_"
         0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // id=3
         0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // size=64
@@ -2517,9 +2548,21 @@ fn build_acds_prototype(sab_entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
         0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, // content "bbbb..."
         0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62,
     ];
+    let data3: &[u8] = data3_records.as_deref().unwrap_or(boilerplate);
+
+    // Records in index order: (segment, position in the segment, schema index, handle).
+    let mut records: Vec<(u32, u32, u32, u32)> = Vec::new();
+    // The schema index is the position in the fixed schema table: 0 thumbnail, 1 ASM data.
+    for (i, (handle, _)) in sab_entries.iter().enumerate() {
+        records.push((2, i as u32, 1, handle.value() as u32));
+    }
+    for (i, (handle, _)) in thumbnail_entries.iter().enumerate() {
+        let segment = if sab_entries.is_empty() { 2 } else { 3 };
+        records.push((segment, i as u32, 0, handle.value() as u32));
+    }
 
     // ── Segment 3: datidx id=4 ────────────────────────────────────
-    let datidx = build_acds_datidx(sab_entries.len());
+    let datidx = build_acds_datidx(&records);
 
     // ── Segment 4: schdat id=5 (schema definitions, fixed) ────────
     let schdat = ACDS_SCHDAT_TEMPLATE;
@@ -2528,8 +2571,8 @@ fn build_acds_prototype(sab_entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
     let schidx = ACDS_SCHIDX_TEMPLATE;
 
     // ── Segment 6: search id=7 ───────────────────────────────────
-    let handles: Vec<u32> = sab_entries.iter().map(|(h, _)| h.value() as u32).collect();
-    let search = build_acds_search_segment(&handles);
+    let handles: Vec<u32> = records.iter().map(|record| record.3).collect();
+    let search = build_acds_search_segment(&handles, sab_entries.is_empty());
 
     // ── Segment 7: segidx id=1 ───────────────────────────────────
     // Compute offsets (all relative to section start = after jard header)
@@ -2612,11 +2655,12 @@ fn build_acds_jard_header(segidx_offset: u32, file_size: u32) -> Vec<u8> {
     header
 }
 
-/// Build `_data_` segment id=2 containing one SAB record per ACIS entity.
+/// Build a `_data_` segment (id 2 or 3) with one record per `(handle, blob)`: the SAB of an ACIS
+/// entity, or the PNG of a layout thumbnail.
 ///
-/// A contiguous 20-byte record table precedes the length-prefixed SAB blobs.
+/// A contiguous 20-byte record table precedes the length-prefixed blobs.
 /// Offsets in the table are relative to the aligned blob area, not the segment.
-fn build_acds_data2_segment(entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
+fn build_acds_data_segment(segment_idx: u32, entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
     let table_size = align16(entries.len() * 20);
     let records_size: usize = entries.iter().map(|(_, sab)| 4 + sab.len()).sum();
     let raw_size = 48 + table_size + records_size;
@@ -2627,7 +2671,7 @@ fn build_acds_data2_segment(entries: &[(Handle, Vec<u8>)]) -> Vec<u8> {
 
     // Segment header (48 bytes)
     seg.extend_from_slice(&[0xAC, 0xD5, 0x5F, 0x64, 0x61, 0x74, 0x61, 0x5F]); // "_data_"
-    seg.extend_from_slice(&2u32.to_le_bytes()); // segment_idx=2
+    seg.extend_from_slice(&segment_idx.to_le_bytes()); // segment_idx
     seg.extend_from_slice(&0u32.to_le_bytes()); // is_blob01
     seg.extend_from_slice(&(seg_size as u64).to_le_bytes()); // segment size
     seg.extend_from_slice(&1u32.to_le_bytes()); // ds_version (always 1, NOT the record count)
@@ -2673,13 +2717,14 @@ fn acds_segment_header(seg: &mut [u8], name: &[u8; 6], segment_idx: u32) {
     seg[40..48].copy_from_slice(&[0x55; 8]); // fill
 }
 
-/// Build `datidx` segment id=4 — one index entry per ACIS record.
+/// Build `datidx` segment id=4 — one index entry per record (SAB or thumbnail).
 ///
 /// Layout (matches the documented datastore reference): the 48-byte header,
 /// then `num_entries` (RL), `di_unknown` (RL = 0), then one 12-byte index entry
-/// per record — `(segidx = 2 [the _data_ segment], offset = i*20, schidx = 1)`.
-fn build_acds_datidx(num_records: usize) -> Vec<u8> {
-    let num = num_records.max(1);
+/// per record — `(segidx of the _data_ segment, offset = position * 20, schidx)`, where
+/// `records` holds `(segment, position in the segment, schema index, handle)`.
+fn build_acds_datidx(records: &[(u32, u32, u32, u32)]) -> Vec<u8> {
+    let num = records.len().max(1);
     let raw = 48 + 8 + num * 12;
     let seg_size = align16(raw).max(128);
     let mut seg = vec![0x70u8; seg_size];
@@ -2688,10 +2733,10 @@ fn build_acds_datidx(num_records: usize) -> Vec<u8> {
     seg[48..52].copy_from_slice(&(num as u32).to_le_bytes()); // num_entries
     seg[52..56].copy_from_slice(&0u32.to_le_bytes()); // di_unknown
     let mut pos = 56;
-    for i in 0..num {
-        seg[pos..pos + 4].copy_from_slice(&2u32.to_le_bytes()); // segidx (→ _data_ id=2)
-        seg[pos + 4..pos + 8].copy_from_slice(&((i as u32) * 20).to_le_bytes()); // offset
-        seg[pos + 8..pos + 12].copy_from_slice(&1u32.to_le_bytes()); // schidx
+    for &(segment, position, schema, _) in records {
+        seg[pos..pos + 4].copy_from_slice(&segment.to_le_bytes()); // segidx of the _data_ segment
+        seg[pos + 4..pos + 8].copy_from_slice(&(position * 20).to_le_bytes()); // offset
+        seg[pos + 8..pos + 12].copy_from_slice(&schema.to_le_bytes()); // schidx
         pos += 12;
     }
     seg
@@ -2707,13 +2752,17 @@ fn build_acds_datidx(num_records: usize) -> Vec<u8> {
 /// **sorted ascending by handle** — the handle→record lookup — followed by a
 /// fixed 24-byte tail. `handles[i]` is the handle of the i-th SAB record, so the
 /// record index stored is the pre-sort position.
-fn build_acds_search_segment(handles: &[u32]) -> Vec<u8> {
+///
+/// `thumbnails_only` is the layout AutoCAD writes when the records are layout thumbnails alone
+/// (schema 0): the two leading words are 1 and 0 instead of 2 and 1, and the handle entries are
+/// not followed by the fixed tail.
+fn build_acds_search_segment(handles: &[u32], thumbnails_only: bool) -> Vec<u8> {
     let n = handles.len();
     let mut content: Vec<u8> = Vec::new();
-    content.extend_from_slice(&2u32.to_le_bytes()); // num_search = 2 schemas
+    content.extend_from_slice(&(if thumbnails_only { 1u32 } else { 2 }).to_le_bytes()); // num_search
 
     // Schema 0: keyed by record index.
-    content.extend_from_slice(&1u32.to_le_bytes()); // schema_namidx
+    content.extend_from_slice(&(if thumbnails_only { 0u32 } else { 1 }).to_le_bytes()); // schema_namidx
     content.extend_from_slice(&(n as u32).to_le_bytes()); // count
     for i in 0..n {
         content.extend_from_slice(&((i as u64) << 32).to_le_bytes());
@@ -2738,8 +2787,10 @@ fn build_acds_search_segment(handles: &[u32]) -> Vec<u8> {
         content.extend_from_slice(&(record_index as u64).to_le_bytes());
     }
     // Fixed 24-byte schema-1 tail from the reference layout.
-    for v in [0u32, 0, 0, 1, 0, 0] {
-        content.extend_from_slice(&v.to_le_bytes());
+    if !thumbnails_only {
+        for v in [0u32, 0, 0, 1, 0, 0] {
+            content.extend_from_slice(&v.to_le_bytes());
+        }
     }
 
     let raw = 48 + content.len();
@@ -3026,6 +3077,26 @@ mod tests {
         assert_ne!(edited.raw_records[&handle.value()].1.data, original);
         assert_eq!(edited.objects[&handle], source.objects[&handle]);
     }
+    /// The search and data index words AutoCAD writes for the two layout thumbnails of a drawing
+    /// without solids (owners 0x1E and 0x22; its `datidx` names its own data segment, here 2).
+    #[test]
+    fn acds_index_segments_of_two_thumbnails_match_autocad() {
+        let words = |bytes: &[u8], from: usize, count: usize| -> Vec<u32> {
+            (0..count)
+                .map(|i| {
+                    u32::from_le_bytes(bytes[from + i * 4..from + i * 4 + 4].try_into().unwrap())
+                })
+                .collect()
+        };
+        let search = build_acds_search_segment(&[0x1E, 0x22], true);
+        assert_eq!(
+            words(&search, 48, 23),
+            [1, 0, 2, 0, 0, 0, 1, 0, 1, 0, 2, 0x1E, 0, 1, 0, 0, 0, 0x22, 0, 1, 0, 1, 0]
+        );
+        let datidx = build_acds_datidx(&[(2, 0, 0, 0x1E), (2, 1, 0, 0x22)]);
+        assert_eq!(words(&datidx, 48, 8), [2, 0, 2, 0, 0, 2, 20, 0]);
+    }
+
     #[test]
     fn acds_record_table_indexes_each_length_prefixed_blob() {
         for count in [1, 2, 7, 8, 16] {
@@ -3037,8 +3108,12 @@ mod tests {
                     )
                 })
                 .collect();
-            let data = build_acds_data2_segment(&entries);
-            let index = build_acds_datidx(count);
+            let data = build_acds_data_segment(2, &entries);
+            let index = build_acds_datidx(
+                &(0..count)
+                    .map(|i| (2, i as u32, 1, 0x100 + i as u32))
+                    .collect::<Vec<_>>(),
+            );
             let read_u32 = |bytes: &[u8], offset| {
                 u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize
             };
@@ -3324,7 +3399,7 @@ mod tests {
             .expect("default layout");
         document.dwg_source_version = Some(DxfVersion::AC1032);
         document.dwg_data_store_handles.insert(layout_handle);
-        document.raw_acds_data = Some(Arc::new(build_acds_prototype(&[])));
+        document.raw_acds_data = Some(Arc::new(build_acds_prototype(&[], &[])));
 
         let bytes = DwgWriter::write_to_vec(&document).expect("write drawing");
         let mut reader = DwgReader::from_stream(std::io::Cursor::new(bytes));

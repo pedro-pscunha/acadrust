@@ -242,6 +242,8 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     dxf_version: DxfVersion,
     /// Collected SAB entries: (entity_handle, sab_binary_data) for ACDSDATA section
     sab_entries: Vec<(Handle, Vec<u8>)>,
+    /// Layout thumbnails of the AcDs data store: (owner layout, PNG).
+    acds_thumbnails: Vec<(Handle, Vec<u8>)>,
     /// Whether currently writing paper space entities (for group code 67)
     writing_paper_space: bool,
     /// Viewport IDs (69) derived per paper-space block when the source does
@@ -297,6 +299,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             handle_seed,
             dxf_version: DxfVersion::AC1024,
             sab_entries: Vec::new(),
+            acds_thumbnails: Vec::new(),
             writing_paper_space: false,
             paper_viewport_ids: HashMap::new(),
             proxy_class_groups: HashMap::new(),
@@ -322,6 +325,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     /// bytes and the dynamic block purge preventer. Call this before [`Self::build_valid_handles`].
     pub fn set_dwg_bridge(&mut self, bridge: bool) {
         self.dwg_bridge = bridge;
+    }
+
+    pub fn set_acds_thumbnails(&mut self, thumbnails: &[crate::document::AcDsThumbnail]) {
+        self.acds_thumbnails = thumbnails
+            .iter()
+            .map(|thumbnail| (thumbnail.owner, thumbnail.png.clone()))
+            .collect();
     }
 
     pub fn set_document_version(&mut self, version: DxfVersion) {
@@ -12968,7 +12978,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     /// This section stores ACIS SAB binary data for 3DSOLID, REGION, and BODY
     /// entities when the DXF version is AC1027 (R2013) or later.
     pub fn write_acdsdata(&mut self) -> Result<()> {
-        if self.sab_entries.is_empty() {
+        // The thumbnails belong to R2013 and later, and to every DWG bridge.
+        let thumbnails = if self.dxf_version >= DxfVersion::AC1027 || self.dwg_bridge {
+            std::mem::take(&mut self.acds_thumbnails)
+        } else {
+            Vec::new()
+        };
+        if self.sab_entries.is_empty() && thumbnails.is_empty() {
             return Ok(());
         }
 
@@ -12978,28 +12994,38 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_i16(70, 2)?;
         self.writer.write_i16(71, 2)?;
 
+        // The ASM schema (1) exists only with SAB data; without it the schemas that follow the
+        // thumbnail schema are numbered from 1, as AutoCAD writes them for thumbnails alone.
+        let has_asm = !self.sab_entries.is_empty();
+        let first_infrastructure = if has_asm { 2 } else { 1 };
+
         // Schema 0: AcDb_Thumbnail_Schema (standard boilerplate)
-        self.write_acds_thumbnail_schema()?;
+        self.write_acds_thumbnail_schema(first_infrastructure)?;
 
         // Schema 1: AcDb3DSolid_ASM_Data (for SAB data)
-        self.write_acds_asm_schema()?;
+        if has_asm {
+            self.write_acds_asm_schema()?;
+        }
 
-        // Schemas 2-5: Standard infrastructure schemas
-        self.write_acds_infrastructure_schemas()?;
+        // The standard infrastructure schemas
+        self.write_acds_infrastructure_schemas(first_infrastructure)?;
 
-        // ACDSRECORD entries (one per entity with SAB data)
+        // ACDSRECORD entries: the SAB data of each entity, then the thumbnails
         // Take entries from self to avoid borrow issues
         let entries = std::mem::take(&mut self.sab_entries);
         for (entity_handle, sab_data) in &entries {
-            self.write_acds_record(*entity_handle, sab_data)?;
+            self.write_acds_record(1, "ASM_Data", *entity_handle, sab_data)?;
         }
         self.sab_entries = entries;
+        for (owner, png) in &thumbnails {
+            self.write_acds_record(0, "Thumbnail_Data", *owner, png)?;
+        }
 
         self.writer.write_section_end()?;
         Ok(())
     }
 
-    fn write_acds_thumbnail_schema(&mut self) -> Result<()> {
+    fn write_acds_thumbnail_schema(&mut self, first_infrastructure: i32) -> Result<()> {
         self.writer.write_string(0, "ACDSSCHEMA")?;
         self.writer.write_i32(90, 0)?;
         self.writer.write_string(1, "AcDb_Thumbnail_Schema")?;
@@ -13011,7 +13037,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_i32(91, 0)?;
 
         // Schema records
-        self.write_acds_schema_records(0)?;
+        self.write_acds_schema_records(0, first_infrastructure)?;
         Ok(())
     }
 
@@ -13027,15 +13053,15 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_i32(91, 0)?;
 
         // Schema records
-        self.write_acds_schema_records(1)?;
+        self.write_acds_schema_records(1, 2)?;
         Ok(())
     }
 
-    fn write_acds_schema_records(&mut self, schema_id: i32) -> Result<()> {
+    fn write_acds_schema_records(&mut self, schema_id: i32, first: i32) -> Result<()> {
         // TreatedAsObjectData record
         self.writer.write_string(101, "ACDSRECORD")?;
         self.writer.write_i32(95, schema_id)?;
-        self.writer.write_i32(90, 2)?;
+        self.writer.write_i32(90, first)?;
         self.writer.write_string(2, "AcDbDs::TreatedAsObjectData")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_bool(291, true)?;
@@ -13043,7 +13069,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // Legacy record
         self.writer.write_string(101, "ACDSRECORD")?;
         self.writer.write_i32(95, schema_id)?;
-        self.writer.write_i32(90, 3)?;
+        self.writer.write_i32(90, first + 1)?;
         self.writer.write_string(2, "AcDbDs::Legacy")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_bool(291, true)?;
@@ -13051,7 +13077,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // Indexable record
         self.writer.write_string(101, "ACDSRECORD")?;
         self.writer.write_string(1, "AcDbDs::ID")?;
-        self.writer.write_i32(90, 4)?;
+        self.writer.write_i32(90, first + 2)?;
         self.writer.write_string(2, "AcDs:Indexable")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_bool(291, true)?;
@@ -13059,7 +13085,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // HandleAttribute record
         self.writer.write_string(101, "ACDSRECORD")?;
         self.writer.write_string(1, "AcDbDs::ID")?;
-        self.writer.write_i32(90, 5)?;
+        self.writer.write_i32(90, first + 3)?;
         self.writer.write_string(2, "AcDbDs::HandleAttribute")?;
         self.writer.write_byte(280, 7)?;
         self.writer.write_i16(282, 1)?;
@@ -13067,36 +13093,36 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         Ok(())
     }
 
-    fn write_acds_infrastructure_schemas(&mut self) -> Result<()> {
-        // Schema 2: TreatedAsObjectDataSchema
+    fn write_acds_infrastructure_schemas(&mut self, first: i32) -> Result<()> {
+        // TreatedAsObjectDataSchema
         self.writer.write_string(0, "ACDSSCHEMA")?;
-        self.writer.write_i32(90, 2)?;
+        self.writer.write_i32(90, first)?;
         self.writer
             .write_string(1, "AcDbDs::TreatedAsObjectDataSchema")?;
         self.writer.write_string(2, "AcDbDs::TreatedAsObjectData")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_i32(91, 0)?;
 
-        // Schema 3: LegacySchema
+        // LegacySchema
         self.writer.write_string(0, "ACDSSCHEMA")?;
-        self.writer.write_i32(90, 3)?;
+        self.writer.write_i32(90, first + 1)?;
         self.writer.write_string(1, "AcDbDs::LegacySchema")?;
         self.writer.write_string(2, "AcDbDs::Legacy")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_i32(91, 0)?;
 
-        // Schema 4: IndexedPropertySchema
+        // IndexedPropertySchema
         self.writer.write_string(0, "ACDSSCHEMA")?;
-        self.writer.write_i32(90, 4)?;
+        self.writer.write_i32(90, first + 2)?;
         self.writer
             .write_string(1, "AcDbDs::IndexedPropertySchema")?;
         self.writer.write_string(2, "AcDs:Indexable")?;
         self.writer.write_byte(280, 1)?;
         self.writer.write_i32(91, 0)?;
 
-        // Schema 5: HandleAttributeSchema
+        // HandleAttributeSchema
         self.writer.write_string(0, "ACDSSCHEMA")?;
-        self.writer.write_i32(90, 5)?;
+        self.writer.write_i32(90, first + 3)?;
         self.writer
             .write_string(1, "AcDbDs::HandleAttributeSchema")?;
         self.writer.write_string(2, "AcDbDs::HandleAttribute")?;
@@ -13107,26 +13133,34 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         Ok(())
     }
 
-    fn write_acds_record(&mut self, entity_handle: Handle, sab_data: &[u8]) -> Result<()> {
+    /// One data record: `schema` is the number of its schema (0 thumbnail, 1 ASM data),
+    /// `property` the binary property it holds, `owner` the handle of the entity or layout.
+    fn write_acds_record(
+        &mut self,
+        schema: i32,
+        property: &str,
+        owner: Handle,
+        data: &[u8],
+    ) -> Result<()> {
         self.writer.write_string(0, "ACDSRECORD")?;
 
-        // Schema reference (1 = AcDb3DSolid_ASM_Data)
-        self.writer.write_i32(90, 1)?;
+        // Schema reference
+        self.writer.write_i32(90, schema)?;
 
-        // Entity handle reference
+        // Owner handle reference
         self.writer.write_string(2, "AcDbDs::ID")?;
         self.writer.write_byte(280, 10)?;
-        self.writer.write_handle(320, entity_handle)?;
+        self.writer.write_handle(320, owner)?;
 
-        // ASM_Data field with SAB binary
-        self.writer.write_string(2, "ASM_Data")?;
+        // The binary property
+        self.writer.write_string(2, property)?;
         self.writer.write_byte(280, 15)?;
 
         // Total byte count
-        self.writer.write_i32(94, sab_data.len() as i32)?;
+        self.writer.write_i32(94, data.len() as i32)?;
 
-        // Write SAB data in 127-byte chunks as gc=310
-        for chunk in sab_data.chunks(127) {
+        // Write the data in 127-byte chunks as gc=310
+        for chunk in data.chunks(127) {
             self.writer.write_binary(310, chunk)?;
         }
 

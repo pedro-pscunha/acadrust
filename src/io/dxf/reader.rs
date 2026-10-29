@@ -603,22 +603,30 @@ impl DxfReader {
     fn read_acdsdata_section(&mut self, document: &mut CadDocument) -> Result<()> {
         // (entity handle, SAB bytes) pairs collected from ASM_Data records.
         let mut blobs: Vec<(u64, Vec<u8>)> = Vec::new();
+        // The same for the layout thumbnails (Thumbnail_Data records).
+        let mut thumbnails: Vec<(u64, Vec<u8>)> = Vec::new();
 
         // Per-record accumulator, flushed on each record/schema boundary (0-code).
         let mut cur_handle: Option<u64> = None;
         let mut is_asm = false;
+        let mut is_thumbnail = false;
         let mut chunks: Vec<u8> = Vec::new();
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
-                // Record boundary — flush a complete ASM_Data record.
-                if is_asm && !chunks.is_empty() {
+                // Record boundary — flush a complete ASM_Data or Thumbnail_Data record.
+                if !chunks.is_empty() {
                     if let Some(h) = cur_handle {
-                        blobs.push((h, std::mem::take(&mut chunks)));
+                        if is_asm {
+                            blobs.push((h, std::mem::take(&mut chunks)));
+                        } else if is_thumbnail {
+                            thumbnails.push((h, std::mem::take(&mut chunks)));
+                        }
                     }
                 }
                 cur_handle = None;
                 is_asm = false;
+                is_thumbnail = false;
                 chunks.clear();
                 if pair.value_string == "ENDSEC" {
                     break;
@@ -626,17 +634,20 @@ impl DxfReader {
                 continue;
             }
             match pair.code {
-                // AcDbDs::ID soft-pointer to the owning entity.
+                // AcDbDs::ID soft-pointer to the owning entity or layout.
                 320 => {
                     if let Ok(h) = u64::from_str_radix(pair.value_string.trim(), 16) {
                         cur_handle = Some(h);
                     }
                 }
-                // Property name — the binary payload that follows is ACIS only
-                // for the ASM_Data property (Thumbnail_Data etc. are skipped).
-                2 => is_asm = pair.value_string == "ASM_Data",
-                // Binary chunk (hex-encoded); only kept once inside ASM_Data.
-                310 if is_asm => {
+                // Property name — the binary payload that follows is ACIS for the ASM_Data
+                // property and a PNG for Thumbnail_Data.
+                2 => {
+                    is_asm = pair.value_string == "ASM_Data";
+                    is_thumbnail = pair.value_string == "Thumbnail_Data";
+                }
+                // Binary chunk (hex-encoded); only kept once inside one of those properties.
+                310 if is_asm || is_thumbnail => {
                     let hex = pair.value_string.trim().as_bytes();
                     let mut i = 0;
                     while i + 1 < hex.len() {
@@ -651,6 +662,17 @@ impl DxfReader {
                 _ => {}
             }
         }
+
+        document
+            .acds_thumbnails
+            .extend(
+                thumbnails
+                    .into_iter()
+                    .map(|(owner, png)| crate::document::AcDsThumbnail {
+                        owner: Handle::new(owner),
+                        png,
+                    }),
+            );
 
         // Attach each SAB blob to its modeler entity.
         for (handle, sab) in blobs {
