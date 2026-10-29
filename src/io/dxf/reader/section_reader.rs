@@ -11954,6 +11954,24 @@ impl<'a> SectionReader<'a> {
                 }
                 Ok(true)
             }
+            // Material (347, a hard pointer: not by layer) and shadow mode (284), R2007+.
+            347 => {
+                if let Ok(h) = u64::from_str_radix(pair.value_string.trim(), 16) {
+                    common.material_handle = Some(Handle::new(h)).filter(|h| !h.is_null());
+                    common.material_flags = if common.material_handle.is_some() {
+                        3
+                    } else {
+                        0
+                    };
+                }
+                Ok(true)
+            }
+            284 => {
+                if let Some(mode) = pair.as_i16() {
+                    common.shadow_flags = mode.clamp(0, 3) as u8;
+                }
+                Ok(true)
+            }
             348 => {
                 if let Ok(h) = u64::from_str_radix(pair.value_string.trim(), 16) {
                     let handle = Handle::new(h);

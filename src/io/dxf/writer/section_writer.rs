@@ -4385,6 +4385,19 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             }
         }
 
+        // Material (a hard pointer to a MATERIAL the file holds; by layer has none) and shadow mode
+        // (0 casts and receives, 1 casts, 2 receives, 3 ignores), R2007+.
+        if self.dxf_version >= DxfVersion::AC1021 {
+            if let Some(material) = common.material_handle.filter(|handle| {
+                common.material_flags == 3 && self.header_pointer_is_written(*handle)
+            }) {
+                self.writer.write_handle(347, material)?;
+            }
+            if common.shadow_flags != 0 {
+                self.writer.write_i16(284, i16::from(common.shadow_flags))?;
+            }
+        }
+
         // Transparency (code 440) — ByLayer is the implicit default.
         if self.dxf_version >= DxfVersion::AC1018 && !common.transparency.is_by_layer() {
             self.writer
