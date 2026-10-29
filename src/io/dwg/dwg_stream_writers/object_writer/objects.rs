@@ -2571,8 +2571,10 @@ impl<'a> DwgObjectWriter<'a> {
                 .write_handle(DwgReferenceType::HardPointer, d.block.value());
         }
         if let ObjectContextKind::HatchView(value) = &obj.kind {
+            // A soft pointer (DXF group 330, null in AutoCAD's own drawings): as a soft owner
+            // AutoCAD discards the object.
             self.writer
-                .write_handle(DwgReferenceType::SoftOwnership, value.view.value());
+                .write_handle(DwgReferenceType::SoftPointer, value.view.value());
         }
         if let ObjectContextKind::MTextAttribute(value) = &obj.kind {
             if value.enable_context {
@@ -3049,5 +3051,87 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_bit_short(wv.display_frame);
 
         self.register_object(wv.handle);
+    }
+}
+
+#[cfg(test)]
+mod hatch_view_context_reference_tests {
+    use crate::document::CadDocument;
+    use crate::io::dwg::dwg_reference_type::DwgReferenceType;
+    use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+    use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
+    use crate::objects::{
+        HatchScaleContext, HatchViewContext, ObjectContextData, ObjectContextKind, ObjectType,
+    };
+    use crate::types::{DxfVersion, Handle, Vector3};
+
+    /// The reference types of the handles that follow the common data of an
+    /// `AcDbHatchViewContextData`: the scale, then the view. The record is written natively (an
+    /// unchanged DWG read would reuse the raw record).
+    fn stored_references(version: DxfVersion, view: Handle) -> Vec<DwgReferenceType> {
+        let mut document = CadDocument::with_version(version);
+        let handle = document.allocate_handle();
+        let owner = document.header.named_objects_dict_handle;
+        let kind = ObjectContextKind::HatchView(HatchViewContext {
+            hatch: HatchScaleContext {
+                pattern_lines: Vec::new(),
+                pattern_scale: 1.0,
+                pattern_base: Vector3::ZERO,
+                loops: Vec::new(),
+            },
+            view,
+            view_normal: Vector3::UNIT_Z,
+            view_rotation: 0.0,
+            evaluate_hatch: false,
+        });
+        document.objects.insert(
+            handle,
+            ObjectType::ObjectContextData(ObjectContextData {
+                handle,
+                owner_handle: owner,
+                reactors: Vec::new(),
+                xdictionary_handle: None,
+                class_version: 4,
+                has_file_to_extension_dictionary: true,
+                uses_legacy_mleader_context_base: false,
+                is_default: false,
+                scale: Handle::new(0x77C00),
+                kind,
+            }),
+        );
+        let (bytes, handles, _, _) = DwgObjectWriter::new(&document).unwrap().write();
+        let at = handles
+            .iter()
+            .find(|(h, _)| *h == handle.value())
+            .map(|(_, at)| i64::from(*at))
+            .expect("the object is written");
+        let reader = DwgObjectReader::new(
+            bytes,
+            version,
+            handles
+                .into_iter()
+                .map(|(h, at)| (h, i64::from(at)))
+                .collect(),
+        )
+        .unwrap();
+        let (type_code, mut merged) = reader.read_record_at(at as usize).unwrap();
+        reader.read_common_non_entity_data(&mut merged, type_code);
+        (0..2).map(|_| merged.read_typed_handle().1).collect()
+    }
+
+    /// AutoCAD stores the view of a hatch view context (DXF group 330, null in a real drawing) as
+    /// a soft pointer, and discards the object when it is a soft owner ("error 34,
+    /// eWrongObjectType").
+    #[test]
+    fn the_view_of_a_hatch_view_context_is_a_soft_pointer() {
+        for version in [DxfVersion::AC1018, DxfVersion::AC1032] {
+            for view in [Handle::NULL, Handle::new(0x77CB0)] {
+                assert_eq!(
+                    stored_references(version, view),
+                    vec![DwgReferenceType::HardPointer, DwgReferenceType::SoftPointer],
+                    "{version:?} {view:?}"
+                );
+            }
+        }
     }
 }
