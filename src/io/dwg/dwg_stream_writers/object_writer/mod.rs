@@ -944,7 +944,8 @@ impl<'a> DwgObjectWriter<'a> {
         // External reference block handle
         self.writer.write_handle(
             DwgReferenceType::HardPointer,
-            layer.xref_block_record_handle.value(),
+            self.xref_block_handle(&layer.name, layer.xref_block_record_handle)
+                .value(),
         );
 
         if self.version.r2000_plus() {
@@ -984,6 +985,19 @@ impl<'a> DwgObjectWriter<'a> {
         }
 
         self.register_object(layer.handle);
+    }
+
+    /// The xref block record a symbol an external reference brought in points at. A DXF has no
+    /// group for the pointer, so a symbol named `<xref>|<name>` whose pointer is null belongs to
+    /// the xref block record of that name.
+    fn xref_block_handle(&self, name: &str, stored: Handle) -> Handle {
+        if !stored.is_null() {
+            return stored;
+        }
+        name.rsplit_once('|')
+            .and_then(|(xref, _)| self.document.block_records.get(xref))
+            .filter(|block| block.flags.is_xref || block.flags.is_xref_overlay)
+            .map_or(Handle::NULL, |block| block.handle)
     }
 
     fn write_text_style_entries(&mut self) {
@@ -1056,7 +1070,8 @@ impl<'a> DwgObjectWriter<'a> {
         // External reference block handle (hard pointer)
         self.writer.write_handle(
             DwgReferenceType::HardPointer,
-            style.xref_block_record_handle.value(),
+            self.xref_block_handle(&style.name, style.xref_block_record_handle)
+                .value(),
         );
 
         self.register_object(style.handle);
@@ -1188,7 +1203,8 @@ impl<'a> DwgObjectWriter<'a> {
         // External reference block handle
         self.writer.write_handle(
             DwgReferenceType::HardPointer,
-            ltype.xref_block_record_handle.value(),
+            self.xref_block_handle(&ltype.name, ltype.xref_block_record_handle)
+                .value(),
         );
 
         // Shape file handles for each segment
@@ -1267,8 +1283,10 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer.write_bit(view.camera_plottable);
         }
 
-        self.writer
-            .write_handle(DwgReferenceType::HardPointer, view.xref_handle.value());
+        self.writer.write_handle(
+            DwgReferenceType::HardPointer,
+            self.xref_block_handle(&view.name, view.xref_handle).value(),
+        );
 
         if self.version.r2007_plus() {
             self.writer.write_handle(
@@ -1329,8 +1347,10 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer.write_bit_short(ucs.ortho_type);
         }
 
-        self.writer
-            .write_handle(DwgReferenceType::HardPointer, ucs.xref_handle.value());
+        self.writer.write_handle(
+            DwgReferenceType::HardPointer,
+            self.xref_block_handle(&ucs.name, ucs.xref_handle).value(),
+        );
 
         if self.version.r2000_plus() {
             self.writer
@@ -1481,8 +1501,11 @@ impl<'a> DwgObjectWriter<'a> {
         }
 
         // Common: External reference block handle (hard pointer)
-        self.writer
-            .write_handle(DwgReferenceType::HardPointer, vport.xref_handle.value());
+        self.writer.write_handle(
+            DwgReferenceType::HardPointer,
+            self.xref_block_handle(&vport.name, vport.xref_handle)
+                .value(),
+        );
 
         // R2007+
         if self.version.r2007_plus() {
@@ -1897,8 +1920,10 @@ impl<'a> DwgObjectWriter<'a> {
         // ── Handle references ───────────────────────────────────────
 
         // External reference block handle (hard pointer)
-        self.writer
-            .write_handle(DwgReferenceType::HardPointer, ds.xref_handle.value());
+        self.writer.write_handle(
+            DwgReferenceType::HardPointer,
+            self.xref_block_handle(&ds.name, ds.xref_handle).value(),
+        );
 
         // 340 DIMTXSTY (hard pointer)
         self.writer
