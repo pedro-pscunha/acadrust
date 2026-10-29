@@ -4044,10 +4044,10 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer
             .write_handle(DwgReferenceType::HardPointer, def.value());
 
-        // Image def reactor handle
+        // Image def reactor handle: a hard owner, as AutoCAD writes it (also the null handle).
         let reactor = e.definition_reactor_handle.unwrap_or(Handle::NULL);
         self.writer
-            .write_handle(DwgReferenceType::HardPointer, reactor.value());
+            .write_handle(DwgReferenceType::HardOwnership, reactor.value());
 
         self.register_object(e.common.handle);
     }
@@ -4128,9 +4128,11 @@ impl<'a> DwgObjectWriter<'a> {
         let def = e.definition_handle.unwrap_or(Handle::NULL);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, def.value());
+        // The reactor is a hard owner, as AutoCAD writes it (also the null handle): with a hard
+        // pointer AutoCAD discards every WIPEOUT ("error 34, eWrongObjectType").
         let reactor = e.definition_reactor_handle.unwrap_or(Handle::NULL);
         self.writer
-            .write_handle(DwgReferenceType::HardPointer, reactor.value());
+            .write_handle(DwgReferenceType::HardOwnership, reactor.value());
 
         self.register_object(e.common.handle);
     }
@@ -6057,5 +6059,88 @@ mod tests {
         r.write_byte(0); // virtual edge
         r.write_cm_true_color(&Color::Index(5));
         assert_eq!(cell_main_stream(DxfVersion::AC1015, &cell), r.to_bytes_snapshot());
+    }
+}
+
+#[cfg(test)]
+mod raster_reactor_reference_tests {
+    use crate::entities::{EntityType, RasterImage, Wipeout};
+    use crate::io::dwg::dwg_reference_type::DwgReferenceType;
+    use crate::io::dwg::dwg_stream_readers::object_reader::entities::read_raster_image_with_references;
+    use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+    use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
+    use crate::types::{DxfVersion, Handle};
+    use crate::CadDocument;
+
+    /// The reference types stored for the definition and the reactor handle of the entity `make`
+    /// builds (written natively: an unchanged DWG read would reuse the raw record).
+    fn stored_references(
+        version: DxfVersion,
+        reactor: Option<Handle>,
+        make: impl FnOnce(Option<Handle>, Option<Handle>) -> EntityType,
+    ) -> [DwgReferenceType; 2] {
+        let mut document = CadDocument::with_version(version);
+        let definition = document.allocate_handle();
+        let entity = make(Some(definition), reactor);
+        let handle = document.add_entity(entity).expect("add entity");
+        let (bytes, handles, _, _) = DwgObjectWriter::new(&document).unwrap().write();
+        let at = handles
+            .iter()
+            .find(|(h, _)| *h == handle.value())
+            .map(|(_, at)| i64::from(*at))
+            .expect("the entity is written");
+        let reader = DwgObjectReader::new(
+            bytes,
+            version,
+            handles
+                .into_iter()
+                .map(|(h, at)| (h, i64::from(at)))
+                .collect(),
+        )
+        .unwrap();
+        let (type_code, mut merged) = reader.read_record_at(at as usize).unwrap();
+        reader.read_common_entity_data(&mut merged, type_code);
+        let version = crate::io::dwg::DwgVersion::from_dxf_version(version).unwrap();
+        read_raster_image_with_references(&mut merged, version).1
+    }
+
+    /// AutoCAD stores the definition as a hard pointer (5) and the image definition reactor as a
+    /// hard owner (3), also when it is the null handle. With code 5 it discards every WIPEOUT on
+    /// open ("error 34, eWrongObjectType").
+    #[test]
+    fn the_reactor_of_a_wipeout_or_an_image_is_a_hard_owner() {
+        for version in [DxfVersion::AC1018, DxfVersion::AC1032] {
+            for reactor in [None, Some(Handle::new(0x7777))] {
+                let wipeout = stored_references(version, reactor, |definition, reactor| {
+                    let mut wipeout = Wipeout::new();
+                    wipeout.definition_handle = definition;
+                    wipeout.definition_reactor_handle = reactor;
+                    EntityType::Wipeout(wipeout)
+                });
+                assert_eq!(
+                    wipeout,
+                    [
+                        DwgReferenceType::HardPointer,
+                        DwgReferenceType::HardOwnership
+                    ],
+                    "{version:?} {reactor:?}: WIPEOUT"
+                );
+                let image = stored_references(version, reactor, |definition, reactor| {
+                    let mut image =
+                        RasterImage::new("image.png", crate::types::Vector3::ZERO, 10.0, 10.0);
+                    image.definition_handle = definition;
+                    image.definition_reactor_handle = reactor;
+                    EntityType::RasterImage(image)
+                });
+                assert_eq!(
+                    image,
+                    [
+                        DwgReferenceType::HardPointer,
+                        DwgReferenceType::HardOwnership
+                    ],
+                    "{version:?} {reactor:?}: IMAGE"
+                );
+            }
+        }
     }
 }

@@ -4209,6 +4209,18 @@ pub fn read_table(
 }
 
 pub fn read_raster_image(reader: &mut DwgMergedReader, version: DwgVersion) -> RasterImageData {
+    read_raster_image_with_references(reader, version).0
+}
+
+/// As [`read_raster_image`], with the reference types the DWG stores for the definition and the
+/// reactor handle.
+pub(crate) fn read_raster_image_with_references(
+    reader: &mut DwgMergedReader,
+    version: DwgVersion,
+) -> (
+    RasterImageData,
+    [crate::io::dwg::dwg_reference_type::DwgReferenceType; 2],
+) {
     let class_version = reader.read_bit_long();
     let insertion_point = reader.read_3bit_double();
     let u_vector = reader.read_3bit_double();
@@ -4241,10 +4253,10 @@ pub fn read_raster_image(reader: &mut DwgMergedReader, version: DwgVersion) -> R
         }
     }
 
-    let definition_handle = reader.read_handle();
-    let reactor_handle = reader.read_handle();
+    let (definition_handle, definition_kind) = reader.read_typed_handle();
+    let (reactor_handle, reactor_kind) = reader.read_typed_handle();
 
-    RasterImageData {
+    let data = RasterImageData {
         class_version,
         insertion_point,
         u_vector,
@@ -4260,7 +4272,8 @@ pub fn read_raster_image(reader: &mut DwgMergedReader, version: DwgVersion) -> R
         definition_handle,
         reactor_handle,
         clip_boundary_vertices,
-    }
+    };
+    (data, [definition_kind, reactor_kind])
 }
 
 pub fn read_wipeout(reader: &mut DwgMergedReader, version: DwgVersion) -> RasterImageData {
