@@ -632,9 +632,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         self.write_header_variable("$DWGCODEPAGE", |w| w.write_string(3, &hdr.code_page))?;
 
-        // === Drawing properties (DWGPROPS) === R2004+ files carry them here,
-        // right after $DWGCODEPAGE.
-        if self.dxf_version >= DxfVersion::AC1018 {
+        // === Drawing properties (DWGPROPS) === R2004+ files carry them here, right after
+        // $DWGCODEPAGE. AutoCAD writes none of these variables and warns that an unknown one is
+        // ignored, so only a DWG bridge writes them.
+        if self.dwg_bridge && self.dxf_version >= DxfVersion::AC1018 {
             self.write_summary_info(document)?;
         }
 

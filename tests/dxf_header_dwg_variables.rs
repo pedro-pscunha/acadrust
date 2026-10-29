@@ -376,3 +376,38 @@ fn the_bridge_dxf_header_has_them() {
         }
     }
 }
+
+/// The header variables of the DXF that AutoCAD saved (`tests/datatable/point_object_id.dxf`,
+/// AC1032): a public DXF has no variable that AutoCAD does not write, as AutoCAD warns that it
+/// ignores an unknown one (`$LASTSAVEDBY`) and refuses a malformed one.
+#[test]
+fn the_public_header_has_only_variables_autocad_writes() {
+    let autocad = std::fs::read_to_string("tests/datatable/point_object_id.dxf").expect("fixture");
+    let known: Vec<String> = autocad
+        .lines()
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .filter(|w| w[0] == "9")
+        .map(|w| w[1].to_string())
+        .collect();
+    assert!(known.len() > 200, "the fixture header is short");
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    set_common(&mut doc);
+    set_2004(&mut doc);
+    set_2007(&mut doc);
+    let info = &mut doc.summary_info;
+    info.title = "Title".into();
+    info.last_saved_by = "Someone".into();
+    info.revision_number = "2".into();
+    info.hyperlink_base = "https://example.com/".into();
+    info.custom_properties = vec![("Tag".into(), "Value".into())];
+    let names = header_names(DxfWriter::new(&doc).write_to_vec().expect("write dxf"));
+    for name in names {
+        // $OSMODE is a variable of AutoCAD that its DXF leaves out for this drawing.
+        assert!(
+            name == "$OSMODE" || known.contains(&name),
+            "{name} is not a header variable of AutoCAD"
+        );
+    }
+}

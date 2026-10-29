@@ -2,6 +2,10 @@
 //! carry them as header variables: `$TITLE` .. `$REVISIONNUMBER` right after
 //! `$DWGCODEPAGE`, the custom properties as `$CUSTOMPROPERTYTAG` /
 //! `$CUSTOMPROPERTY` pairs after `$LASTSAVEDBY`, and `$HYPERLINKBASE`.
+//!
+//! Only `$HYPERLINKBASE` is a header variable of AutoCAD. AutoCAD writes none of the others and
+//! warns that an unknown variable (`$LASTSAVEDBY`) is ignored, so they belong to the DWG bridge
+//! (`DxfWriter::for_dwg_bridge`) only.
 
 use std::io::Cursor;
 
@@ -41,7 +45,7 @@ fn document_with_properties(version: DxfVersion) -> CadDocument {
 }
 
 fn write(document: &CadDocument, binary: bool) -> Vec<u8> {
-    let mut writer = DxfWriter::new(document);
+    let mut writer = DxfWriter::new(document).for_dwg_bridge();
     writer.set_binary(binary);
     writer.write_to_vec().expect("DXF write")
 }
@@ -197,4 +201,17 @@ fn r2000_keeps_only_the_hyperlink_base() {
         read(text.into_bytes()).summary_info.hyperlink_base,
         document.summary_info.hyperlink_base
     );
+}
+
+#[test]
+fn a_public_dxf_has_only_the_hyperlink_base() {
+    for version in [DxfVersion::AC1015, DxfVersion::AC1018, DxfVersion::AC1032] {
+        let document = document_with_properties(version);
+        let bytes = DxfWriter::new(&document).write_to_vec().expect("DXF write");
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        for name in &PROPERTY_VARIABLES[..9] {
+            assert!(!has_variable(&text, name), "{version:?}: {name}");
+        }
+        assert!(has_variable(&text, "$HYPERLINKBASE"), "{version:?}");
+    }
 }
