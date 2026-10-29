@@ -7413,6 +7413,8 @@ impl<'a> SectionReader<'a> {
                                 .objects
                                 .insert(object.handle, ObjectType::DgnLineStyle(object));
                         }
+                        "ACADRUST_VXCONTROL" => self.read_vx_table_bridge(true, document)?,
+                        "ACADRUST_VXRECORD" => self.read_vx_table_bridge(false, document)?,
                         "ACAD_PROXY_OBJECT" => {
                             let object = self.read_proxy_object_dxf()?;
                             let handle = object.handle;
@@ -12453,6 +12455,43 @@ impl<'a> SectionReader<'a> {
             }
         }
         Ok(object)
+    }
+
+    /// Read the private records of a DWG bridge that carry the VX table (see
+    /// `write_vx_table_bridge` in the writer).
+    fn read_vx_table_bridge(&mut self, control: bool, document: &mut CadDocument) -> Result<()> {
+        let mut record = crate::tables::VxTableRecord::new("");
+        let mut entries = Vec::new();
+        let mut flags = 0i16;
+        while let Some(pair) = self.reader.read_pair()? {
+            if pair.code == 0 {
+                self.reader.push_back(pair);
+                break;
+            }
+            let handle = || parse_dxf_handle(&pair.value_string);
+            match pair.code {
+                5 => record.handle = handle(),
+                2 => record.name = pair.value_string.clone(),
+                70 => flags = pair.as_i16().unwrap_or(0),
+                290 => record.is_on = pair.as_bool().unwrap_or(false),
+                340 => record.xref_handle = handle(),
+                331 => record.viewport = handle(),
+                341 => record.previous_entry = handle(),
+                350 => entries.push(handle()),
+                _ => {}
+            }
+        }
+        if control {
+            document.vx_table.set_handle(record.handle);
+            document.header.vpent_hdr_control_handle = record.handle;
+            document.vx_control_entries = entries;
+        } else {
+            record.is_xref_reference = flags & 1 != 0;
+            record.is_xref_resolved = flags & 2 != 0;
+            record.is_xref_dependent = flags & 4 != 0;
+            document.vx_table.add_allow_duplicate(record);
+        }
+        Ok(())
     }
 
     fn read_proxy_object_dxf(&mut self) -> Result<ProxyObject> {

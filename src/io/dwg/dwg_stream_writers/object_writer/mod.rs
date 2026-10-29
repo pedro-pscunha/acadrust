@@ -600,8 +600,9 @@ impl<'a> DwgObjectWriter<'a> {
         );
         self.write_dimstyle_control();
 
-        // R13-R2000 only: VPEntHdr control (viewport entity header table)
-        if self.version.r13_15_only() {
+        // VPEntHdr control (viewport entity header table): always in R13-R2000, and in a later
+        // drawing that has VX records (a Civil 3D drawing of R2018 does; a new one has none).
+        if self.writes_vx_table() {
             self.write_vpent_hdr_control();
         }
 
@@ -614,7 +615,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.write_vport_entries();
         self.write_appid_entries();
         self.write_dimstyle_entries();
-        if self.version.r13_15_only() {
+        if self.writes_vx_table() {
             self.write_vx_entries();
         }
 
@@ -829,9 +830,16 @@ impl<'a> DwgObjectWriter<'a> {
         self.register_object(table_handle);
     }
 
-    /// VPENT_HDR_CONTROL — R13-R2000 only.
+    /// Whether the VX table (viewport entity headers) is written: always for R13-R2000, whose
+    /// header points to it, and for a later release when the document has VX records.
+    fn writes_vx_table(&self) -> bool {
+        self.version.r13_15_only() || self.document.vx_table.iter().next().is_some()
+    }
+
+    /// VPENT_HDR_CONTROL.
     /// Viewport entity header table control.
-    /// The header section references this via hard-ownership handle.
+    /// The header section of R13-R2000 references this via hard-ownership handle; later headers
+    /// have no pointer to it.
     fn write_vpent_hdr_control(&mut self) {
         let table_handle = self.document.vx_table.handle();
         if table_handle.is_null() {
@@ -879,10 +887,16 @@ impl<'a> DwgObjectWriter<'a> {
         );
 
         self.writer.write_variable_text(&entry.name);
-        self.writer.write_bit(entry.is_xref_reference);
+        // Up to R2004 a table record holds the 64 flag, the xref index and the dependence bit;
+        // from R2007 the xref index alone (as `read_vx_table_record` reads them).
+        if !self.version.r2007_plus() {
+            self.writer.write_bit(entry.is_xref_reference);
+        }
         self.writer
             .write_bit_short(if entry.is_xref_resolved { 256 } else { 0 });
-        self.writer.write_bit(entry.is_xref_dependent);
+        if !self.version.r2007_plus() {
+            self.writer.write_bit(entry.is_xref_dependent);
+        }
         self.writer.write_bit(entry.is_on);
         self.writer
             .write_handle(DwgReferenceType::HardPointer, entry.xref_handle.value());

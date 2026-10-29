@@ -7003,7 +7003,48 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_object_xdata(document, *handle, object)?;
         }
 
+        if self.dwg_bridge {
+            self.write_vx_table_bridge(document)?;
+        }
+
         self.writer.write_section_end()?;
+        Ok(())
+    }
+
+    /// The VX table (viewport entity headers) of a drawing of R2004 or later has no public DXF
+    /// form: AutoCAD's DXFOUT does not write it. A DWG bridge carries it as two private object
+    /// records, read back by the DXF reader: `ACADRUST_VXCONTROL` (its handle and the
+    /// entry handles in groups 350) and one `ACADRUST_VXRECORD` per record (owner 330, name 2,
+    /// flags 70, "on" 290, xref block 340, viewport 331, previous entry 341).
+    fn write_vx_table_bridge(&mut self, document: &CadDocument) -> Result<()> {
+        if document.vx_table.iter().next().is_none() {
+            return Ok(());
+        }
+        let control = document.vx_table.handle();
+        self.writer.write_string(0, "ACADRUST_VXCONTROL")?;
+        self.writer.write_handle(5, control)?;
+        self.writer.write_handle(330, Handle::NULL)?;
+        self.writer.write_subclass("AcDbVxControl")?;
+        for entry in &document.vx_control_entries {
+            self.writer.write_handle(350, *entry)?;
+        }
+        for record in document.vx_table.iter() {
+            self.writer.write_string(0, "ACADRUST_VXRECORD")?;
+            self.writer.write_handle(5, record.handle)?;
+            self.writer.write_handle(330, control)?;
+            self.writer.write_subclass("AcDbVxRecord")?;
+            self.writer.write_string(2, &record.name)?;
+            self.writer.write_i16(
+                70,
+                i16::from(record.is_xref_reference)
+                    | i16::from(record.is_xref_resolved) << 1
+                    | i16::from(record.is_xref_dependent) << 2,
+            )?;
+            self.writer.write_bool(290, record.is_on)?;
+            self.writer.write_handle(340, record.xref_handle)?;
+            self.writer.write_handle(331, record.viewport)?;
+            self.writer.write_handle(341, record.previous_entry)?;
+        }
         Ok(())
     }
 
