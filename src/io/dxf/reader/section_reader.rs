@@ -8666,6 +8666,8 @@ impl<'a> SectionReader<'a> {
     /// Read an IMAGEDEF_REACTOR object
     fn read_imagedef_reactor(&mut self) -> Result<Option<ImageDefinitionReactor>> {
         let mut obj = ImageDefinitionReactor::new(Handle::NULL);
+        // The first 330 is the owner; the one after the subclass marker is the image.
+        let mut in_subclass = false;
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
                 self.reader.push_back(pair);
@@ -8677,9 +8679,14 @@ impl<'a> SectionReader<'a> {
                         obj.handle = Handle::new(h);
                     }
                 }
+                100 => in_subclass = pair.value_string == "AcDbRasterImageDefReactor",
                 330 => {
                     if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
-                        obj.owner = Handle::new(h);
+                        if in_subclass {
+                            obj.image_handle = Handle::new(h);
+                        } else {
+                            obj.owner = Handle::new(h);
+                        }
                     }
                 }
                 _ => {}

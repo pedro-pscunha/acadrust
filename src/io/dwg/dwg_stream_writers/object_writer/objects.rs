@@ -2304,7 +2304,7 @@ impl<'a> DwgObjectWriter<'a> {
         let type_code = self.class_type_code("IMAGEDEF_REACTOR", common::OBJ_IMAGEDEFREACTOR);
         self.write_common_non_entity_data(type_code, reactor.handle, reactor.owner, &[], &None);
 
-        self.writer.write_bit_long(0); // class version
+        self.writer.write_bit_long(2); // class version, as AutoCAD writes it
 
         // C# reference does NOT write an image_handle here
         // (the reader gets this from the reactor's owner relationship)

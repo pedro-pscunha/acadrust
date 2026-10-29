@@ -9564,8 +9564,14 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_handle(5, obj.handle)?;
         self.writer.write_handle(330, obj.owner)?;
         self.writer.write_subclass("AcDbRasterImageDefReactor")?;
+        // A reactor read from a DWG holds the image as its owner only; both groups name it.
+        let image = if obj.image_handle.is_null() {
+            obj.owner
+        } else {
+            obj.image_handle
+        };
         self.writer.write_i32(90, 2)?; // class version
-        self.writer.write_handle(330, obj.image_handle)?;
+        self.writer.write_handle(330, image)?;
         Ok(())
     }
 
