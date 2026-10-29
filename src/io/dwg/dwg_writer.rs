@@ -1230,6 +1230,36 @@ fn prepare_header(
         }
     }
 
+    // ── Current layer and linetype by name ──
+    // A DXF names them ($CLAYER, $CELTYPE) and the handles read with it need not be theirs, so a
+    // drawing that went through DXF came back with layer 0 and ByLayer current. The name wins
+    // unless it is the default and the handle already names another object, as for the styles below.
+    if let Some(layer) = document
+        .layers
+        .iter()
+        .find(|l| l.name.eq_ignore_ascii_case(&h.current_layer_name))
+    {
+        let handle_is_other_layer = document
+            .layers
+            .iter()
+            .any(|l| l.handle == h.current_layer_handle && l.name != "0");
+        if h.current_layer_name != "0" || !handle_is_other_layer {
+            h.current_layer_handle = layer.handle;
+        }
+    }
+    if let Some(linetype) = document
+        .line_types
+        .iter()
+        .find(|lt| lt.name.eq_ignore_ascii_case(&h.current_linetype_name))
+    {
+        let handle_is_other_linetype = document.line_types.iter().any(|lt| {
+            lt.handle == h.current_linetype_handle && !lt.name.eq_ignore_ascii_case("ByLayer")
+        });
+        if !h.current_linetype_name.eq_ignore_ascii_case("ByLayer") || !handle_is_other_linetype {
+            h.current_linetype_handle = linetype.handle;
+        }
+    }
+
     // ── Current text and dimension styles by name ──
     // A DXF names them ($TEXTSTYLE, $DIMSTYLE); the handles read with it need not be those styles' handles
     // in this document, and the DWG stores only handles, so AutoCAD opened the drawing with Standard current.
