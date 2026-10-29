@@ -780,12 +780,33 @@ impl<'a> DwgObjectWriter<'a> {
                         AssocPersistentSubentId::code_for_class_name(&subent.class_name)
                             .unwrap_or(subent.class_code),
                     );
-                    for item in &subent.values {
-                        self.writer.write_bit_long(*item);
+                    // The reader takes the number of fields of the class; a model that holds
+                    // fewer gets zeros, so the stream does not lose the compound flag.
+                    let expected = AssocPersistentSubentId::field_count_for_class_name(
+                        subent.resolved_class_name(),
+                    )
+                    .unwrap_or(0);
+                    for index in 0..subent.values.len().max(expected) {
+                        let item = subent.values.get(index).copied().unwrap_or(0);
+                        self.writer.write_bit_long(item);
                     }
                 } else {
-                    self.writer
-                        .write_variable_text(subent.resolved_class_name());
+                    let class_name = subent.resolved_class_name();
+                    self.writer.write_variable_text(class_name);
+                    // The fields of the class: for AcDbAssocEdgePersSubentId a BS class version
+                    // and two BL vertex ids, zero when the model holds fewer.
+                    if let Some(count) =
+                        AssocPersistentSubentId::field_count_for_class_name(class_name)
+                    {
+                        for index in 0..count {
+                            let value = subent.values.get(index).copied().unwrap_or(0);
+                            if index == 0 {
+                                self.writer.write_bit_short(value as i16);
+                            } else {
+                                self.writer.write_bit_long(value);
+                            }
+                        }
+                    }
                 }
                 self.writer.write_bit(subent.dependent_on_compound_object);
             }

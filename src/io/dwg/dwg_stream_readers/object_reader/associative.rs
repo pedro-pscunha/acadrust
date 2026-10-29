@@ -213,12 +213,29 @@ fn read_persistent_subent(
         let class_name = reader.try_read_variable_text().unwrap_or_default();
         let class_code =
             AssocPersistentSubentId::code_for_class_name(&class_name).unwrap_or_default();
+        // The fields of the class come before the compound flag: for AcDbAssocEdgePersSubentId a
+        // BS class version and two BL vertex ids (the DXF writes each as a 90); the single edge id
+        // has none. Each read is bounded so a damaged tail does not invalidate the object.
+        let mut values = Vec::new();
+        if let Some(count) = AssocPersistentSubentId::field_count_for_class_name(&class_name) {
+            for index in 0..count {
+                let value = if index == 0 {
+                    reader.try_read_bit_short().map(i32::from)
+                } else {
+                    reader.try_read_bit_long()
+                };
+                let Some(value) = value else {
+                    break;
+                };
+                values.push(value);
+            }
+        }
         let dependent_on_compound_object = reader.main_remaining_bits() >= 1 && reader.read_bit();
         AssocPersistentSubentId {
             class_name,
             dependent_on_compound_object,
             class_code,
-            values: Vec::new(),
+            values,
             leading_flag: false,
         }
     }
@@ -1598,7 +1615,7 @@ pub fn read_associative_data(
 
 #[cfg(test)]
 mod tests {
-    use super::read_surface_action;
+    use super::{read_persistent_subent, read_surface_action};
     use crate::io::dwg::dwg_reference_type::DwgReferenceType::HardPointer;
     use crate::io::dwg::dwg_stream_readers::merged_reader::DwgMergedReader;
     use crate::io::dwg::dwg_stream_writers::merged_writer::DwgMergedWriter;
@@ -1629,5 +1646,45 @@ mod tests {
         assert_eq!(action.parameter_body.dependency.value(), 0x50D);
         assert_eq!(action.surface_body.dependency.value(), 0);
         assert_eq!(action.class_version, 0);
+    }
+
+    // The persistent subentity id of a geometry dependency in the text layout of a pre-R2013 DWG:
+    // the class name in the text stream, then the fields of the class in the main stream (for
+    // AcDbAssocEdgePersSubentId a BS class version and two BL vertex ids), then the compound flag.
+    // AutoCAD discards an object whose fields the writer left out.
+
+    #[test]
+    fn an_edge_subentity_id_of_a_text_layout_has_its_three_fields() {
+        let mut writer = DwgMergedWriter::new(DwgVersion::AC24, DxfVersion::AC1024);
+        writer.save_position_for_size();
+        writer.write_variable_text("AcDbAssocEdgePersSubentId");
+        writer.write_bit_short(0); // class version
+        writer.write_bit_long(9);
+        writer.write_bit_long(10);
+        writer.write_bit(false); // not dependent on a compound object
+        let mut reader = DwgMergedReader::new(writer.merge(), DxfVersion::AC1024, 0);
+        let size = reader.read_raw_long();
+        reader.setup_text_and_handle(size);
+        let subent = read_persistent_subent(&mut reader, DwgVersion::AC24, DxfVersion::AC1024);
+        reader.check_error().expect("edge id");
+        assert_eq!(subent.class_name, "AcDbAssocEdgePersSubentId");
+        assert_eq!(subent.values, vec![0, 9, 10]);
+        assert!(!subent.dependent_on_compound_object);
+    }
+
+    #[test]
+    fn a_single_edge_subentity_id_of_a_text_layout_has_no_fields() {
+        let mut writer = DwgMergedWriter::new(DwgVersion::AC24, DxfVersion::AC1024);
+        writer.save_position_for_size();
+        writer.write_variable_text("AcDbAssocSingleEdgePersSubentId");
+        writer.write_bit(true);
+        let mut reader = DwgMergedReader::new(writer.merge(), DxfVersion::AC1024, 0);
+        let size = reader.read_raw_long();
+        reader.setup_text_and_handle(size);
+        let subent = read_persistent_subent(&mut reader, DwgVersion::AC24, DxfVersion::AC1024);
+        reader.check_error().expect("single edge id");
+        assert_eq!(subent.class_name, "AcDbAssocSingleEdgePersSubentId");
+        assert!(subent.values.is_empty());
+        assert!(subent.dependent_on_compound_object);
     }
 }
