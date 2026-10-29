@@ -2396,6 +2396,9 @@ impl DwgDocumentBuilder {
                                         bulge: d.bulge,
                                         curve_tangent: d.tangent_dir,
                                         id: d.vertex_id,
+                                        handle: d.handle,
+                                        layer: String::new(),
+                                        common: None,
                                     })
                                 } else {
                                     None
@@ -2413,6 +2416,7 @@ impl DwgDocumentBuilder {
                                         layer: String::new(),
                                         position: d.position,
                                         flags: d.flags as i32,
+                                        common: None,
                                     })
                                 } else {
                                     None

@@ -432,6 +432,9 @@ pub struct PolyfaceMesh {
     pub faces: Vec<PolyfaceFace>,
     /// SEQEND handle (for DXF/DWG compatibility).
     pub seqend_handle: Option<Handle>,
+    /// The common data of the SEQEND record (its handle, layer, XDATA...), or `None` when the
+    /// mesh has none. Its `handle` is `seqend_handle`.
+    pub seqend: Option<Box<EntityCommon>>,
 }
 
 impl PolyfaceMesh {
@@ -458,6 +461,7 @@ impl PolyfaceMesh {
             vertices: Vec::new(),
             faces: Vec::new(),
             seqend_handle: None,
+            seqend: None,
         }
     }
 

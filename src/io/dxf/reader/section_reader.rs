@@ -13102,9 +13102,12 @@ impl<'a> SectionReader<'a> {
             tangent: f64,
             handle: u64,
             layer: String,
+            /// Everything else the VERTEX record carries (see `child_extras`).
+            common: EntityCommon,
         }
 
         let mut common = EntityCommon::new();
+        let mut seqend: Option<EntityCommon> = None;
         let mut flags: i16 = 0;
         let mut elevation = 0.0f64;
         let mut thickness = 0.0f64;
@@ -13139,6 +13142,7 @@ impl<'a> SectionReader<'a> {
                     let mut vcolor: Option<Color> = None;
                     let mut vhandle: u64 = 0;
                     let mut vlayer = String::from("0");
+                    let mut vcommon = EntityCommon::new();
                     while let Some(vpair) = self.reader.read_pair()? {
                         if vpair.code == 0 {
                             self.reader.push_back(vpair);
@@ -13194,11 +13198,13 @@ impl<'a> SectionReader<'a> {
                                 if let Some(ci) = vpair.as_i16() {
                                     vcolor = Some(Color::from_index(ci));
                                 }
+                                self.try_read_common_entity_code(&vpair, &mut vcommon)?;
                             }
                             420 => {
                                 if let Some(tc) = vpair.as_i32_bits() {
                                     vcolor = Some(Color::from_true_color_value(tc));
                                 }
+                                self.try_read_common_entity_code(&vpair, &mut vcommon)?;
                             }
                             70 => {
                                 if let Some(v) = vpair.as_i16() {
@@ -13225,16 +13231,22 @@ impl<'a> SectionReader<'a> {
                                     vi4 = v;
                                 }
                             }
-                            _ => {}
+                            // The common codes: the linetype, lineweight, XDATA, extension
+                            // dictionary, reactors...
+                            _ => {
+                                self.try_read_common_entity_code(&vpair, &mut vcommon)?;
+                            }
                         }
                     }
+                    vcommon.handle = Handle::new(vhandle);
+                    vcommon.layer = vlayer.clone();
                     // Polygon-mesh vertices also use bit 64. The parent POLYLINE
                     // must identify a polyface before its vertices become geometry
                     // (bit 64) or face records (bit 128 without bit 64).
                     if (flags & 64) != 0 && (vflags & 64) != 0 {
                         // Polyface geometry vertex
                         pface_vertices.push(PolyfaceVertex {
-                            common: EntityCommon::default(),
+                            common: vcommon,
                             location: loc,
                             flags: PolyfaceVertexFlags::from_bits_truncate(vflags),
                             bulge: 0.0,
@@ -13246,7 +13258,7 @@ impl<'a> SectionReader<'a> {
                     } else if (flags & 64) != 0 && (vflags & 128) != 0 {
                         // Face record (only bit 128 set, no bit 64)
                         pface_faces.push(PolyfaceFace {
-                            common: EntityCommon::default(),
+                            common: vcommon,
                             flags: PolyfaceVertexFlags::from_bits_truncate(vflags),
                             index1: vi1,
                             index2: vi2,
@@ -13268,15 +13280,19 @@ impl<'a> SectionReader<'a> {
                             tangent,
                             handle: vhandle,
                             layer: vlayer.clone(),
+                            common: vcommon,
                         });
                     }
                 } else if pair.value_string == "SEQEND" {
+                    let mut end = EntityCommon::new();
                     while let Some(seqend_pair) = self.reader.read_pair()? {
                         if seqend_pair.code == 0 {
                             self.reader.push_back(seqend_pair);
                             break;
                         }
+                        self.try_read_common_entity_code(&seqend_pair, &mut end)?;
                     }
+                    seqend = Some(end);
                     break;
                 } else {
                     self.reader.push_back(pair);
@@ -13370,6 +13386,10 @@ impl<'a> SectionReader<'a> {
             mesh.elevation = elevation;
             mesh.vertices = pface_vertices;
             mesh.faces = pface_faces;
+            if let Some(end) = seqend {
+                mesh.seqend_handle = Some(end.handle).filter(|handle| !handle.is_null());
+                mesh.seqend = Some(Box::new(end));
+            }
             Ok(Some(EntityType::PolyfaceMesh(mesh)))
         } else if (flags & 16) != 0 {
             let mut mesh = PolygonMesh::new();
@@ -13386,15 +13406,14 @@ impl<'a> SectionReader<'a> {
                 .iter()
                 .map(|rv| PolygonMeshVertex {
                     common: EntityCommon {
-                        handle: Handle::new(rv.handle),
-                        layer: rv.layer.clone(),
                         owner_handle: mesh.common.handle,
-                        ..EntityCommon::default()
+                        ..rv.common.clone()
                     },
                     location: rv.loc,
                     flags: rv.vflags,
                 })
                 .collect();
+            mesh.seqend = seqend.map(Box::new);
             Ok(Some(EntityType::PolygonMesh(mesh)))
         } else if (flags & 8) != 0 {
             let mut pl = Polyline3D::new();
@@ -13412,9 +13431,12 @@ impl<'a> SectionReader<'a> {
                     v.flags = rv.vflags as i32;
                     v.handle = Handle::new(rv.handle);
                     v.layer = rv.layer.clone();
+                    v.common =
+                        crate::entities::polyline::child_extras(rv.common.clone(), &pl.common);
                     v
                 })
                 .collect();
+            pl.seqend = seqend.map(Box::new);
             Ok(Some(EntityType::Polyline3D(pl)))
         } else {
             let mut pl = Polyline2D::new();
@@ -13445,9 +13467,16 @@ impl<'a> SectionReader<'a> {
                     };
                     v.bulge = rv.bulge;
                     v.curve_tangent = rv.tangent;
+                    v.handle = Handle::new(rv.handle);
+                    if rv.layer != pl.common.layer {
+                        v.layer = rv.layer.clone();
+                    }
+                    v.common =
+                        crate::entities::polyline::child_extras(rv.common.clone(), &pl.common);
                     v
                 })
                 .collect();
+            pl.seqend = seqend.map(Box::new);
             // The polyline keeps its default widths, as AutoCAD does in a DWG. Only a vertex that
             // is explicitly zero wide under a non-zero default is a problem: a renderer that
             // takes 0 as "use the default" would bleed it onto that segment, so such a polyline

@@ -5143,6 +5143,7 @@ impl<'a> DwgObjectWriter<'a> {
                 layer: e.common.layer.clone(),
                 position: v.location,
                 flags: v.flags.bits() as i32,
+                common: None,
             });
         }
         self.write_polyline3d(&p3d);
@@ -5953,7 +5954,16 @@ mod tests {
                 let EntityType::Polyline2D(polyline) = restored.get_entity(handle).unwrap() else {
                     panic!("polyline missing");
                 };
-                assert_eq!(polyline.vertices, expected, "{version:?}, closed={closed}");
+                // The vertices a DWG gives carry the handles of its records.
+                let restored_vertices: Vec<Vertex2D> = polyline
+                    .vertices
+                    .iter()
+                    .map(|vertex| Vertex2D {
+                        handle: Handle::NULL,
+                        ..vertex.clone()
+                    })
+                    .collect();
+                assert_eq!(restored_vertices, expected, "{version:?}, closed={closed}");
                 assert_eq!(polyline.is_closed(), closed);
                 let dxf = DxfWriter::new(&restored)
                     .with_version(DxfVersion::AC1014)

@@ -650,11 +650,30 @@ fn normalize_entity_for_comparison(entity: &mut EntityType) {
                 v.handle = Handle::NULL;
                 // Layer may be inherited from the polyline after write/read
                 v.layer = String::new();
+                v.common = None;
             }
+            p.seqend = None;
+        }
+        // Polyline2D: the handles of the child records (a writer allocates them), and the
+        // common data of the children, which the polyline gives them
+        EntityType::Polyline2D(p) => {
+            for v in &mut p.vertices {
+                v.handle = Handle::NULL;
+                v.layer = String::new();
+                v.common = None;
+            }
+            p.seqend = None;
+        }
+        EntityType::PolygonMesh(m) => {
+            for v in &mut m.vertices {
+                normalize_entity_common(&mut v.common);
+            }
+            m.seqend = None;
         }
         // PolyfaceMesh: seqend handle + nested vertex/face EntityCommon
         EntityType::PolyfaceMesh(pf) => {
             pf.seqend_handle = None;
+            pf.seqend = None;
             for v in &mut pf.vertices {
                 normalize_entity_common(&mut v.common);
             }

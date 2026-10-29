@@ -133,6 +133,10 @@ pub struct Vertex3DPolyline {
     pub position: Vector3,
     /// Vertex flags
     pub flags: i32,
+    /// The other common data of the VERTEX record that is not the polyline's (colour, linetype,
+    /// lineweight, XDATA, extension dictionary, reactors...), or `None` when it has none. Its
+    /// `handle` and `layer` are not used: the fields above are (an empty layer is the polyline's).
+    pub common: Option<Box<EntityCommon>>,
 }
 
 impl Vertex3DPolyline {
@@ -143,6 +147,7 @@ impl Vertex3DPolyline {
             layer: "0".to_string(),
             position,
             flags: 32, // 3D polyline vertex flag
+            common: None,
         }
     }
 
@@ -205,6 +210,9 @@ pub struct Polyline3D {
     pub normal: Vector3,
     /// Vertex list
     pub vertices: Vec<Vertex3DPolyline>,
+    /// The common data of the SEQEND record that ends the vertices (its handle, layer, XDATA...),
+    /// or `None` when the polyline has none and the writers generate it.
+    pub seqend: Option<Box<EntityCommon>>,
 }
 
 impl Polyline3D {
@@ -223,6 +231,7 @@ impl Polyline3D {
             elevation: 0.0,
             normal: Vector3::UNIT_Z,
             vertices: Vec::new(),
+            seqend: None,
         }
     }
 

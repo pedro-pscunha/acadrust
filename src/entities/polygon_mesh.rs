@@ -114,6 +114,9 @@ pub struct PolygonMesh {
     pub normal: Vector3,
     /// Mesh vertices (M × N grid)
     pub vertices: Vec<PolygonMeshVertex>,
+    /// The common data of the SEQEND record that ends the vertices (its handle, layer, XDATA...),
+    /// or `None` when the mesh has none and the writers generate it.
+    pub seqend: Option<Box<EntityCommon>>,
 }
 
 impl PolygonMesh {
@@ -130,6 +133,7 @@ impl PolygonMesh {
             elevation: 0.0,
             normal: Vector3::UNIT_Z,
             vertices: Vec::new(),
+            seqend: None,
         }
     }
 

@@ -95,7 +95,18 @@ fn assert_geometry(expected: &CadDocument, actual: &CadDocument, handles: [Handl
                 assert_eq!(points(actual), points(expected));
             }
             (EntityType::Polyline2D(expected), EntityType::Polyline2D(actual)) => {
-                assert_eq!(actual.vertices, expected.vertices);
+                // The vertices a DWG gives carry the handles of its records.
+                let vertices = |polyline: &acadrust::entities::Polyline2D| {
+                    polyline
+                        .vertices
+                        .iter()
+                        .map(|vertex| acadrust::entities::Vertex2D {
+                            handle: acadrust::types::Handle::NULL,
+                            ..vertex.clone()
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(vertices(actual), vertices(expected));
             }
             (EntityType::Insert(expected), EntityType::Insert(actual)) => {
                 assert_eq!(actual.insert_point, expected.insert_point);

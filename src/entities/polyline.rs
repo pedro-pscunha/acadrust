@@ -1,7 +1,7 @@
 //! Polyline entities (2D and 3D polylines)
 
 use super::{Entity, EntityCommon};
-use crate::types::{BoundingBox3D, Vector2, Vector3};
+use crate::types::{BoundingBox3D, Handle, Vector2, Vector3};
 
 /// Polyline flags (matches DXF group code 70)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -127,6 +127,68 @@ impl From<i16> for SmoothSurfaceType {
     }
 }
 
+/// The common data a writer gives a child record (a VERTEX or the SEQEND) of the polyline whose
+/// common data is `parent`: `extra` when the child has data of its own, else the polyline's layer,
+/// colour, linetype, linetype scale and lineweight (AutoCAD keeps them equal and AUDIT reports any
+/// other value). The handle is `handle`, the owner is the polyline, and an empty `layer` is the
+/// polyline's.
+pub(crate) fn child_common(
+    parent: &EntityCommon,
+    handle: Handle,
+    layer: &str,
+    extra: Option<&EntityCommon>,
+) -> EntityCommon {
+    let mut child = match extra {
+        Some(extra) => extra.clone(),
+        None => {
+            let mut child = EntityCommon::new();
+            child.color = parent.color;
+            child.linetype = parent.linetype.clone();
+            child.linetype_handle = parent.linetype_handle;
+            child.line_weight = parent.line_weight;
+            child.linetype_scale = parent.linetype_scale;
+            child
+        }
+    };
+    child.handle = handle;
+    child.owner_handle = parent.handle;
+    child.layer = if layer.is_empty() {
+        parent.layer.clone()
+    } else {
+        layer.to_string()
+    };
+    child
+}
+
+/// Whether a child record's common data holds anything that the polyline's own data does not give
+/// it (see [`child_common`]).
+pub(crate) fn child_has_data(child: &EntityCommon, parent: &EntityCommon) -> bool {
+    let plain = child.extended_data.is_empty()
+        && child.extended_data.raw_dwg_eed.is_empty()
+        && child.xdictionary_handle.is_none()
+        && child.reactors.is_empty()
+        && (child.color == crate::types::Color::ByLayer || child.color == parent.color)
+        && (!child.has_linetype() || child.linetype == parent.linetype)
+        && (child.line_weight == crate::types::LineWeight::ByLayer
+            || child.line_weight == parent.line_weight)
+        && (child.linetype_scale - 1.0).abs() < 1e-12
+        && !child.invisible
+        && child.transparency.is_by_layer()
+        && child.plotstyle_flags == 0
+        && child.material_flags == 0
+        && child.shadow_flags == 0;
+    !plain
+}
+
+/// The common data of a child record read from a file, when it carries anything that the
+/// polyline's own data does not give it (see [`child_common`]); `None` for a plain child.
+pub(crate) fn child_extras(
+    child: EntityCommon,
+    parent: &EntityCommon,
+) -> Option<Box<EntityCommon>> {
+    child_has_data(&child, parent).then(|| Box::new(child))
+}
+
 /// A vertex in a 2D polyline
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -145,6 +207,15 @@ pub struct Vertex2D {
     pub curve_tangent: f64,
     /// Vertex ID (R2010+)
     pub id: i32,
+    /// Handle of the VERTEX record: the null handle when it has none, and the writers then allocate
+    /// one. A reference to the vertex (an XRECORD group 340, for example) names it.
+    pub handle: Handle,
+    /// Layer of the VERTEX record when it is not the polyline's (empty: the polyline's).
+    pub layer: String,
+    /// The other common data of the VERTEX record that is not the polyline's (colour, linetype,
+    /// lineweight, XDATA, extension dictionary, reactors...), or `None` when it has none. Its
+    /// `handle` and `layer` are not used: the fields above are.
+    pub common: Option<Box<EntityCommon>>,
 }
 
 impl Vertex2D {
@@ -157,6 +228,9 @@ impl Vertex2D {
             bulge: 0.0,
             curve_tangent: 0.0,
             id: 0,
+            handle: Handle::NULL,
+            layer: String::new(),
+            common: None,
         }
     }
 
@@ -223,6 +297,9 @@ pub struct Polyline2D {
     pub normal: Vector3,
     /// Vertices
     pub vertices: Vec<Vertex2D>,
+    /// The common data of the SEQEND record that ends the vertices (its handle, layer, XDATA...),
+    /// or `None` when the polyline has none and the writers generate it.
+    pub seqend: Option<Box<EntityCommon>>,
 }
 
 impl Polyline2D {
@@ -237,6 +314,7 @@ impl Polyline2D {
             elevation: 0.0,
             normal: Vector3::new(0.0, 0.0, 1.0),
             vertices: Vec::new(),
+            seqend: None,
         }
     }
 
