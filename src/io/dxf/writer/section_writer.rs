@@ -1218,7 +1218,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     /// Header variables that point at an object: the current material, the visual styles of
     /// interference objects, interference viewports and 3D drag, and the plot style of new
     /// objects. A DWG header holds each as a handle; the DXF reference gives them the groups
-    /// 347, 345, 346, 349 and, for the plot style, 380 (the type) with the handle in 390.
+    /// 347, 345, 346, 349 and, for the plot style, `$CEPSNTYPE` (380, the type) and `$CEPSNID`
+    /// (390, the handle of a type 3).
     fn write_header_object_pointers(
         &mut self,
         hdr: &crate::document::HeaderVariables,
@@ -1253,13 +1254,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             } else {
                 hdr.current_plotstyle_type
             };
-            self.write_header_variable("$CEPSNTYPE", |w| {
-                w.write_i16(380, kind)?;
-                if by_object {
-                    w.write_handle(390, plot_style)?;
-                }
-                Ok(())
-            })?;
+            self.write_header_variable("$CEPSNTYPE", |w| w.write_i16(380, kind))?;
+            if by_object {
+                self.write_header_variable("$CEPSNID", |w| w.write_handle(390, plot_style))?;
+            }
         }
         Ok(())
     }

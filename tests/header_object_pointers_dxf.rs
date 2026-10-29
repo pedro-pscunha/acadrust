@@ -1,7 +1,8 @@
 //! Header variables that hold a pointer to an object: the current material ($CMATERIAL, group
 //! 347), the visual styles of interference objects, interference viewports and 3D drag
 //! ($INTERFEREOBJVS 345, $INTERFEREVPVS 346, $DRAGVS 349) and the plot style of new objects
-//! ($CEPSNTYPE 380 with the handle in 390). A DWG header holds each as a handle. The DWG reader
+//! ($CEPSNTYPE 380, and $CEPSNID 390 for the handle of a plot style by object). A DWG header
+//! holds each as a handle. The DWG reader
 //! discarded three of them, the DWG writer wrote them null, and the DXF writer and reader left
 //! all of them out, so a drawing that went DWG, DXF, DWG came back without them.
 
@@ -214,15 +215,16 @@ fn the_plot_style_of_new_objects_survives_dxf_to_dwg() {
         doc.header.current_plotstyle_handle = placeholder;
         let dxf = String::from_utf8(DxfWriter::new(&doc).write_to_vec().expect("write dxf"))
             .expect("utf-8");
+        // The Autodesk HEADER reference: $CEPSNTYPE is group 380 only, $CEPSNID is group 390.
         assert_eq!(
             header_variable(&dxf, "$CEPSNTYPE"),
-            vec![
-                "380".to_string(),
-                "3".to_string(),
-                "390".to_string(),
-                format!("{:X}", placeholder.value())
-            ],
-            "{version:?}: DXF"
+            vec!["380".to_string(), "3".to_string()],
+            "{version:?}: DXF type"
+        );
+        assert_eq!(
+            header_variable(&dxf, "$CEPSNID"),
+            vec!["390".to_string(), format!("{:X}", placeholder.value())],
+            "{version:?}: DXF handle"
         );
         let bridged = through_dxf(&doc);
         assert_eq!(
@@ -259,4 +261,51 @@ fn a_plot_style_type_other_than_by_object_writes_no_handle() {
         header_variable(&dxf, "$CEPSNTYPE"),
         vec!["380".to_string(), "2".to_string()]
     );
+    assert!(!dxf.contains("$CEPSNID"), "a type 2 has no handle");
+}
+
+/// A HEADER section written by hand in the layout of the Autodesk DXF Reference: the type in
+/// `$CEPSNTYPE` (380) and, for a plot style by object, its handle in `$CEPSNID` (390).
+fn standard_header(variables: &str) -> Vec<u8> {
+    format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n{variables}0\nENDSEC\n0\nEOF\n")
+        .into_bytes()
+}
+
+fn read_header(bytes: Vec<u8>) -> CadDocument {
+    DxfReader::from_reader(Cursor::new(bytes))
+        .expect("reader")
+        .read()
+        .expect("read dxf")
+}
+
+#[test]
+fn the_reader_takes_cepsnid_as_its_own_variable() {
+    for variables in [
+        "9\n$CEPSNTYPE\n380\n3\n9\n$CEPSNID\n390\nA7\n",
+        "9\n$CEPSNID\n390\nA7\n9\n$CEPSNTYPE\n380\n3\n",
+    ] {
+        let doc = read_header(standard_header(variables));
+        assert_eq!(doc.header.current_plotstyle_type, 3, "{variables:?}");
+        assert_eq!(
+            doc.header.current_plotstyle_handle,
+            Handle::new(0xA7),
+            "{variables:?}"
+        );
+    }
+}
+
+#[test]
+fn the_reader_still_takes_the_combined_form_of_the_earlier_build() {
+    let doc = read_header(standard_header("9\n$CEPSNTYPE\n380\n3\n390\nA7\n"));
+    assert_eq!(doc.header.current_plotstyle_type, 3);
+    assert_eq!(doc.header.current_plotstyle_handle, Handle::new(0xA7));
+}
+
+#[test]
+fn a_type_without_cepsnid_reads_no_handle() {
+    let doc = read_header(standard_header(
+        "9\n$CEPSNTYPE\n380\n2\n9\n$PSTYLEMODE\n290\n1\n",
+    ));
+    assert_eq!(doc.header.current_plotstyle_type, 2);
+    assert!(doc.header.current_plotstyle_handle.is_null());
 }

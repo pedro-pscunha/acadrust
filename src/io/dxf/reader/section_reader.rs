@@ -2813,7 +2813,8 @@ impl<'a> SectionReader<'a> {
                             hdr.current_plotstyle_type = v;
                         }
                     }
-                    // The plot style a type 3 names follows in group 390.
+                    // An earlier acadrust build wrote the handle of a type 3 here, as group 390,
+                    // instead of in `$CEPSNID`.
                     if let Some(p) = self.reader.read_pair()? {
                         match (p.code, p.as_handle()) {
                             (390, Some(handle)) => {
@@ -2821,6 +2822,11 @@ impl<'a> SectionReader<'a> {
                             }
                             _ => self.reader.push_back(p),
                         }
+                    }
+                }
+                "$CEPSNID" => {
+                    if let Some(handle) = self.reader.read_pair()?.and_then(|p| p.as_handle()) {
+                        hdr.current_plotstyle_handle = Handle::new(handle);
                     }
                 }
                 "$CMATERIAL" | "$INTERFEREOBJVS" | "$INTERFEREVPVS" | "$DRAGVS" => {
