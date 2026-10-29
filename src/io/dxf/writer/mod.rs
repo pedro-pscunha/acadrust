@@ -117,6 +117,8 @@ pub struct DxfWriter<'a> {
     pub binary: bool,
     /// Explicit target version; `None` writes the document's own version.
     version: Option<crate::types::DxfVersion>,
+    /// Keep a plain 2D polyline as POLYLINE instead of down-saving it to LWPOLYLINE.
+    keep_heavy_polylines: bool,
 }
 
 impl<'a> DxfWriter<'a> {
@@ -126,6 +128,7 @@ impl<'a> DxfWriter<'a> {
             document,
             binary: false,
             version: None,
+            keep_heavy_polylines: false,
         }
     }
 
@@ -135,6 +138,7 @@ impl<'a> DxfWriter<'a> {
             document,
             binary: true,
             version: None,
+            keep_heavy_polylines: false,
         }
     }
 
@@ -147,6 +151,13 @@ impl<'a> DxfWriter<'a> {
     /// because the R13 structure preserves everything the document holds.
     pub fn with_version(mut self, version: crate::types::DxfVersion) -> Self {
         self.version = Some(version);
+        self
+    }
+
+    /// Write a plain 2D polyline as POLYLINE, VERTEX records and SEQEND, as AutoCAD keeps it,
+    /// instead of down-saving it to an LWPOLYLINE (the default, see issue #63).
+    pub fn keep_heavy_polylines(mut self) -> Self {
+        self.keep_heavy_polylines = true;
         self
     }
 
@@ -298,10 +309,12 @@ impl<'a> DxfWriter<'a> {
         let extra_handles = count_extra_handles(
             document,
             SectionWriter::<W>::writable_version(output_version),
+            self.keep_heavy_polylines,
         );
         let handle_seed = handle_start + extra_handles + 1;
         let mut section_writer = SectionWriter::new(writer, handle_start, handle_seed);
         section_writer.set_version(output_version);
+        section_writer.set_keep_heavy_polylines(self.keep_heavy_polylines);
         section_writer.build_valid_handles(document);
 
         // Write all sections
@@ -353,7 +366,11 @@ impl<'a> DxfWriter<'a> {
     }
 }
 
-fn count_extra_handles(document: &CadDocument, version: crate::types::DxfVersion) -> u64 {
+fn count_extra_handles(
+    document: &CadDocument,
+    version: crate::types::DxfVersion,
+    keep_heavy_polylines: bool,
+) -> u64 {
     let mut count = 0u64;
 
     for entity in document.entities() {
@@ -366,6 +383,7 @@ fn count_extra_handles(document: &CadDocument, version: crate::types::DxfVersion
                 // Plain 2D polylines down-save as LWPOLYLINE for R2000+,
                 // which emits no child records (see SectionWriter).
                 if version >= crate::types::DxfVersion::AC1015
+                    && !keep_heavy_polylines
                     && section_writer::polyline2d_downsaves_to_lwpolyline(polyline)
                 {
                     continue;

@@ -107,6 +107,8 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     loft_reference_appid: Option<Handle>,
     /// Original DWG context used for opaque proxy payloads.
     source_dwg_context: Option<(DxfVersion, u8)>,
+    /// Write a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of an LWPOLYLINE.
+    keep_heavy_polylines: bool,
 }
 
 impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
@@ -131,7 +133,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             loft_input_entities: HashMap::new(),
             loft_reference_appid: None,
             source_dwg_context: None,
+            keep_heavy_polylines: false,
         }
+    }
+
+    /// Keep a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of down-saving it to LWPOLYLINE.
+    pub fn set_keep_heavy_polylines(&mut self, keep: bool) {
+        self.keep_heavy_polylines = keep;
     }
 
     /// Build the set of all handles that will appear in the output DXF.
@@ -4406,7 +4414,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // Writing every heavy polyline back as POLYLINE/VERTEX/SEQEND is a
         // large structural divergence from the source drawing, and some CAD
         // applications flag the resurrected VERTEX owner wiring on save.
-        if self.dxf_version >= DxfVersion::AC1015 && polyline2d_downsaves_to_lwpolyline(polyline) {
+        if self.dxf_version >= DxfVersion::AC1015
+            && !self.keep_heavy_polylines
+            && polyline2d_downsaves_to_lwpolyline(polyline)
+        {
             return self.write_polyline2d_as_lwpolyline(polyline, owner);
         }
         self.writer.write_entity_type("POLYLINE")?;
