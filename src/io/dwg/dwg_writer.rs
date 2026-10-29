@@ -45,6 +45,19 @@ use super::file_headers::{
 /// The output version is determined by [`CadDocument::version`].
 pub struct DwgWriter;
 
+/// One record the DWG writer leaves out of a DWG because it cannot write it: it has no DWG bytes
+/// (it came from a DXF), its bytes are of another DWG version than the one written, or they do
+/// not parse as a record of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DwgOmission {
+    /// Handle of the record.
+    pub handle: Handle,
+    /// DXF class name of the record, such as `AEC_WALL` or `AECBWALL`.
+    pub name: String,
+    /// Why it was left out.
+    pub reason: String,
+}
+
 impl DwgWriter {
     /// Write a DWG file to the given path.
     ///
@@ -54,21 +67,46 @@ impl DwgWriter {
     /// - An I/O error occurs
     /// - The document contains invalid data
     pub fn write_to_file<P: AsRef<Path>>(path: P, document: &CadDocument) -> Result<()> {
-        validate_unknown_records(document)?;
+        validate_unknown_records(document, false)?;
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
         Self::write_to_writer(writer, document)
     }
 
     /// Write a DWG file to any `Write + Seek` output.
-    pub fn write_to_writer<W: Write + Seek>(mut output: W, document: &CadDocument) -> Result<()> {
-        validate_unknown_records(document)?;
+    pub fn write_to_writer<W: Write + Seek>(output: W, document: &CadDocument) -> Result<()> {
+        Self::write_document(output, document, false)
+    }
+
+    /// Write a DWG file to any `Write + Seek` output, leaving out the records it cannot write
+    /// instead of failing at the first one: entities and objects of a class acadrust keeps as DWG
+    /// bytes that have none (they came from a DXF), that are bytes of another DWG version than the
+    /// one written, or that do not parse. Returns the records left out (the same as
+    /// [`Self::omitted_records`]). [`Self::write_to_writer`] fails on them, so that DWG data does
+    /// not disappear unnoticed.
+    pub fn write_to_writer_omitting_unwritable<W: Write + Seek>(
+        output: W,
+        document: &CadDocument,
+    ) -> Result<Vec<DwgOmission>> {
+        Self::write_document(output, document, true)?;
+        Ok(Self::omitted_records(document))
+    }
+
+    fn write_document<W: Write + Seek>(
+        mut output: W,
+        document: &CadDocument,
+        omit: bool,
+    ) -> Result<()> {
+        validate_unknown_records(document, omit)?;
         if document.version == DxfVersion::AC1009 {
             let bytes = crate::io::dwg::r12::write_document(document)?;
             output.write_all(&bytes)?;
             return Ok(());
         }
         let mut prepared = crate::io::loft_parameters::prepared(document);
+        if omit {
+            prepare_unwritable_records(&mut prepared);
+        }
         prepare_surface_classes(&mut prepared);
         prepare_database_references(&mut prepared);
         prepare_table_keys(&mut prepared);
@@ -145,7 +183,7 @@ impl DwgWriter {
     /// Useful for isolating whether a read error is caused by compression
     /// or by the object data itself.
     pub fn write_to_file_no_lz77<P: AsRef<Path>>(path: P, document: &CadDocument) -> Result<()> {
-        validate_unknown_records(document)?;
+        validate_unknown_records(document, false)?;
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
         Self::write_to_writer_no_lz77(writer, document)
@@ -156,7 +194,7 @@ impl DwgWriter {
         mut output: W,
         document: &CadDocument,
     ) -> Result<()> {
-        validate_unknown_records(document)?;
+        validate_unknown_records(document, false)?;
         validate_version(document.version)?;
         let mut prepared = crate::io::loft_parameters::prepared(document);
         prepare_surface_classes(&mut prepared);
@@ -166,6 +204,26 @@ impl DwgWriter {
         prepare_roundtrip_records(&mut prepared);
         prepare_book_colors(&mut prepared)?;
         write_ac21_impl(&mut output, prepared.as_ref(), document.version, true)
+    }
+
+    /// The records a DWG save of `document` leaves out: entities and objects of a class acadrust
+    /// keeps as DWG bytes that have none (they came from a DXF) or whose bytes do not fit the
+    /// version written. The save writes the rest of the drawing instead of failing.
+    pub fn omitted_records(document: &CadDocument) -> Vec<DwgOmission> {
+        unwritable_records(document)
+            .into_iter()
+            .map(|record| record.omission)
+            .collect()
+    }
+
+    /// [`Self::write_to_writer_omitting_unwritable`] to a byte vector: the DWG and the records
+    /// left out of it.
+    pub fn write_to_vec_omitting_unwritable(
+        document: &CadDocument,
+    ) -> Result<(Vec<u8>, Vec<DwgOmission>)> {
+        let mut buffer = Cursor::new(Vec::new());
+        let omitted = Self::write_to_writer_omitting_unwritable(&mut buffer, document)?;
+        Ok((buffer.into_inner(), omitted))
     }
 
     /// Write a DWG file to a byte vector (useful for testing).
@@ -193,7 +251,119 @@ pub(crate) fn prepare_active_viewport_elevation(document: &mut std::borrow::Cow<
     }
 }
 
-fn validate_unknown_records(document: &CadDocument) -> Result<()> {
+struct Unwritable {
+    entity: bool,
+    omission: DwgOmission,
+}
+
+/// Entities and objects the DWG writer cannot write: DWG bytes missing (the record came from a
+/// DXF), of another version than the one written, or not a record of it. R12 has no class
+/// records at all and fails in [`validate_unknown_records`] instead.
+fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
+    let version = document.version;
+    if version == DxfVersion::AC1009 {
+        return Vec::new();
+    }
+    let reason = |bytes: bool, source: Option<DxfVersion>, parses: bool| -> Option<String> {
+        if !bytes {
+            Some("no DWG data (it came from a DXF)".to_string())
+        } else if source.is_some_and(|source| source != version) {
+            Some(format!("its DWG data is of {:?}, not {version:?}", source.unwrap_or(version)))
+        } else if !parses {
+            Some("its DWG data is not a record of this version".to_string())
+        } else {
+            None
+        }
+    };
+    let mut found = Vec::new();
+    for entity in document.entities() {
+        let (name, bytes, source, parses) = match entity {
+            crate::entities::EntityType::Extended(entity) => {
+                let crate::entities::ExtendedEntityData::Arch(data) = &entity.data else {
+                    continue;
+                };
+                let fits = data.raw_dwg_data.is_some()
+                    && data.dwg_source_version.is_none_or(|source| source == version);
+                (
+                    data.dxf_name.clone(),
+                    data.raw_dwg_data.is_some(),
+                    data.dwg_source_version,
+                    !fits
+                        || DwgObjectWriter::validate_architecture_record(data, version).is_ok(),
+                )
+            }
+            crate::entities::EntityType::Unknown(entity) => (
+                entity.dxf_name.clone(),
+                entity.raw_dwg_data.is_some(),
+                entity.dwg_source_version,
+                true,
+            ),
+            _ => continue,
+        };
+        if let Some(reason) = reason(bytes, source, parses) {
+            found.push(Unwritable {
+                entity: true,
+                omission: DwgOmission {
+                    handle: entity.common().handle,
+                    name,
+                    reason,
+                },
+            });
+        }
+    }
+    for (handle, object) in &document.objects {
+        let (name, bytes, source, parses) = match object {
+            crate::objects::ObjectType::Arch(object) => {
+                let fits = object.raw_dwg_data.is_some()
+                    && object.raw_dwg_version.is_none_or(|source| source == version);
+                (
+                    object.dxf_name.clone(),
+                    object.raw_dwg_data.is_some(),
+                    object.raw_dwg_version,
+                    !fits || DwgObjectWriter::validate_architecture_object(object, version).is_ok(),
+                )
+            }
+            crate::objects::ObjectType::Unknown {
+                type_name,
+                raw_dwg_data,
+                raw_dwg_version,
+                ..
+            } => (type_name.clone(), raw_dwg_data.is_some(), *raw_dwg_version, true),
+            _ => continue,
+        };
+        if let Some(reason) = reason(bytes, source, parses) {
+            found.push(Unwritable {
+                entity: false,
+                omission: DwgOmission {
+                    handle: *handle,
+                    name,
+                    reason,
+                },
+            });
+        }
+    }
+    found
+}
+
+/// Leave the unwritable records out of the copy being written (the caller's document stays as it
+/// is). What refers to them (dictionary entries, reactors, extension dictionaries) is dropped by
+/// the object writer, which only keeps references to records it writes.
+fn prepare_unwritable_records(document: &mut std::borrow::Cow<'_, CadDocument>) {
+    let found = unwritable_records(document);
+    if found.is_empty() {
+        return;
+    }
+    let document = document.to_mut();
+    for record in found {
+        if record.entity {
+            document.remove_entity(record.omission.handle);
+        } else {
+            document.objects.remove(&record.omission.handle);
+        }
+    }
+}
+
+fn validate_unknown_records(document: &CadDocument, omit: bool) -> Result<()> {
     for entity in document.entities() {
         if document.version < DxfVersion::AC1018 {
             if let crate::entities::EntityType::Insert(insert) = entity {
@@ -234,29 +404,35 @@ fn validate_unknown_records(document: &CadDocument) -> Result<()> {
         }
         if let crate::entities::EntityType::Extended(entity) = entity {
             if let crate::entities::ExtendedEntityData::Arch(data) = &entity.data {
-                if data.raw_dwg_data.is_none()
-                    || data
-                        .dwg_source_version
-                        .is_some_and(|version| version != document.version)
-                    || document.version == DxfVersion::AC1009
+                // When omitting, other versions' bytes and bytes that do not parse are left out
+                // (see `unwritable_records`); R12 has no classes at all.
+                if document.version == DxfVersion::AC1009
+                    || (!omit
+                        && (data.raw_dwg_data.is_none()
+                            || data
+                                .dwg_source_version
+                                .is_some_and(|version| version != document.version)))
                 {
                     return Err(DxfError::NotImplemented(format!(
                         "Cannot encode Arch entity {} at handle {} as DWG {:?}: compatible raw DWG data is required",
                         data.dxf_name, entity.common.handle, document.version
                     )));
                 }
-                crate::io::dwg::dwg_stream_writers::DwgObjectWriter::validate_architecture_record(
-                    data,
-                    document.version,
-                )?;
+                if !omit {
+                    crate::io::dwg::dwg_stream_writers::DwgObjectWriter::validate_architecture_record(
+                        data,
+                        document.version,
+                    )?;
+                }
             }
         }
         if let crate::entities::EntityType::Unknown(entity) = entity {
-            if entity.raw_dwg_data.is_none()
-                || entity
-                    .dwg_source_version
-                    .is_some_and(|version| version != document.version)
-                || document.version == DxfVersion::AC1009
+            if document.version == DxfVersion::AC1009
+                || (!omit
+                    && (entity.raw_dwg_data.is_none()
+                        || entity
+                            .dwg_source_version
+                            .is_some_and(|version| version != document.version)))
             {
                 return Err(DxfError::NotImplemented(format!(
                     "Cannot encode custom entity {} at handle {} as DWG {:?}: compatible raw DWG data is required",
@@ -267,18 +443,21 @@ fn validate_unknown_records(document: &CadDocument) -> Result<()> {
     }
     for object in document.objects.values() {
         if let crate::objects::ObjectType::Arch(object) = object {
-            if object.raw_dwg_data.is_none()
-                || object
-                    .raw_dwg_version
-                    .is_some_and(|version| version != document.version)
-                || document.version == DxfVersion::AC1009
+            if document.version == DxfVersion::AC1009
+                || (!omit
+                    && (object.raw_dwg_data.is_none()
+                        || object
+                            .raw_dwg_version
+                            .is_some_and(|version| version != document.version)))
             {
                 return Err(DxfError::NotImplemented(format!(
                     "Cannot encode Arch object {} at handle {} as DWG {:?}: compatible raw DWG data is required",
                     object.dxf_name, object.handle, document.version
                 )));
             }
-            DwgObjectWriter::validate_architecture_object(object, document.version)?;
+            if !omit {
+                DwgObjectWriter::validate_architecture_object(object, document.version)?;
+            }
         }
         if let crate::objects::ObjectType::DynamicBlock(value) = object {
             if let crate::objects::DynamicBlockData::PropertiesTable(table) = &value.data {
@@ -310,9 +489,10 @@ fn validate_unknown_records(document: &CadDocument) -> Result<()> {
             ..
         } = object
         {
-            if raw_dwg_data.is_none()
-                || raw_dwg_version.is_some_and(|version| version != document.version)
-                || document.version == DxfVersion::AC1009
+            if document.version == DxfVersion::AC1009
+                || (!omit
+                    && (raw_dwg_data.is_none()
+                        || raw_dwg_version.is_some_and(|version| version != document.version)))
             {
                 return Err(DxfError::NotImplemented(format!(
                     "Cannot encode custom object {type_name} at handle {handle} as DWG {:?}: compatible raw DWG data is required",
