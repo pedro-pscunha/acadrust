@@ -9705,12 +9705,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     }
                     XDataValue::Handle(h) => {
                         // A handle that pointed at an omitted Arch object would
-                        // otherwise remain as an unknown xdata reference.
-                        if !h.is_null()
-                            && (self.valid_handles.is_empty() || self.valid_handles.contains(h))
-                        {
-                            self.writer.write_handle(1005, *h)?;
-                        }
+                        // otherwise remain as an unknown xdata reference: it becomes the
+                        // null handle. The group stays, because xdata is positional
+                        // (DSTYLE is `1070 <variable>` then its value).
+                        let live = self.valid_handles.is_empty() || self.valid_handles.contains(h);
+                        self.writer
+                            .write_handle(1005, if live { *h } else { Handle::NULL })?;
                     }
                     XDataValue::Point3D(p) => {
                         self.writer.write_double(1010, p.x)?;
