@@ -19,11 +19,13 @@
 //!
 //! Based on the reference `DwgWriter` class.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Seek, Write};
 use std::path::Path;
 
 use crate::document::{CadDocument, HeaderVariables, SummaryInfo};
+use crate::entities::EntityCommon;
 use crate::error::{DxfError, Result};
 use crate::types::{DxfVersion, Handle};
 
@@ -346,19 +348,126 @@ fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
 }
 
 /// Leave the unwritable records out of the copy being written (the caller's document stays as it
-/// is). What refers to them (dictionary entries, reactors, extension dictionaries) is dropped by
-/// the object writer, which only keeps references to records it writes.
+/// is), and with them every reference the copy holds to them: a record that names a record the DWG
+/// does not have is not valid. The dictionary entries are dropped by the object writer, which
+/// only keeps references to records it writes; the rest is in [`drop_references_to`].
 fn prepare_unwritable_records(document: &mut std::borrow::Cow<'_, CadDocument>) {
     let found = unwritable_records(document);
     if found.is_empty() {
         return;
     }
     let document = document.to_mut();
+    let handles = |document: &CadDocument| -> HashSet<Handle> {
+        document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .chain(document.objects.keys().copied())
+            .collect()
+    };
+    let before = handles(document);
     for record in found {
         if record.entity {
             document.remove_entity(record.omission.handle);
         } else {
             document.objects.remove(&record.omission.handle);
+        }
+    }
+    let after = handles(document);
+    let gone: HashSet<Handle> = before.difference(&after).copied().collect();
+    drop_references_to(document, &gone);
+}
+
+/// Whether the common data of an entity names a record in `gone`.
+fn names_a_record_in(common: &EntityCommon, gone: &HashSet<Handle>) -> bool {
+    let names = |handle: &Option<Handle>| handle.is_some_and(|handle| gone.contains(&handle));
+    common.reactors.iter().any(|handle| gone.contains(handle))
+        || [
+            &common.xdictionary_handle,
+            &common.plotstyle_handle,
+            &common.material_handle,
+            &common.full_visual_style_handle,
+            &common.face_visual_style_handle,
+            &common.edge_visual_style_handle,
+            &common.color_book_handle,
+        ]
+        .into_iter()
+        .any(names)
+}
+
+/// Take the records in `gone` out of the common data of an entity: its reactors, extension
+/// dictionary, material, visual styles and color book, and its plot style, which is the plot style
+/// of the layer (by layer) again when the object it named is gone.
+fn drop_references_from(common: &mut EntityCommon, gone: &HashSet<Handle>) {
+    let drop = |handle: &mut Option<Handle>| {
+        if handle.is_some_and(|value| gone.contains(&value)) {
+            *handle = None;
+        }
+    };
+    common.reactors.retain(|handle| !gone.contains(handle));
+    drop(&mut common.xdictionary_handle);
+    drop(&mut common.material_handle);
+    drop(&mut common.full_visual_style_handle);
+    drop(&mut common.face_visual_style_handle);
+    drop(&mut common.edge_visual_style_handle);
+    drop(&mut common.color_book_handle);
+    if common
+        .plotstyle_handle
+        .is_some_and(|handle| gone.contains(&handle))
+    {
+        common.plotstyle_handle = None;
+        common.plotstyle_flags = 0;
+    }
+}
+
+/// Take the records in `gone` out of what the rest of the document names: entities (and the
+/// attributes of an INSERT), objects with reactors, the extension dictionary of an Arch object, the
+/// side tables of reactors and extension dictionaries, and the plot style and material of a layer.
+/// An entity that names none of them keeps its verbatim record.
+fn drop_references_to(document: &mut CadDocument, gone: &HashSet<Handle>) {
+    let entities: Vec<Handle> = document
+        .entities()
+        .filter(|entity| {
+            names_a_record_in(entity.common(), gone)
+                || matches!(entity, crate::entities::EntityType::Insert(insert)
+                    if insert.attributes.iter().any(|a| names_a_record_in(&a.common, gone)))
+        })
+        .map(|entity| entity.common().handle)
+        .collect();
+    for handle in entities {
+        let Some(entity) = document.get_entity_mut(handle) else {
+            continue;
+        };
+        drop_references_from(entity.common_mut(), gone);
+        if let crate::entities::EntityType::Insert(insert) = entity {
+            for attribute in &mut insert.attributes {
+                drop_references_from(&mut attribute.common, gone);
+            }
+        }
+    }
+    for object in document.objects.values_mut() {
+        if let Some(reactors) = object.reactors_mut() {
+            reactors.retain(|handle| !gone.contains(handle));
+        }
+        if let crate::objects::ObjectType::Arch(arch) = object {
+            if arch.xdictionary_handle.is_some_and(|x| gone.contains(&x)) {
+                arch.xdictionary_handle = None;
+            }
+        }
+    }
+    for reactors in document.reactors_by_handle.values_mut() {
+        reactors.retain(|handle| !gone.contains(handle));
+    }
+    document
+        .reactors_by_handle
+        .retain(|handle, reactors| !gone.contains(handle) && !reactors.is_empty());
+    document
+        .xdic_by_handle
+        .retain(|handle, xdictionary| !gone.contains(handle) && !gone.contains(xdictionary));
+    for layer in document.layers.iter_mut() {
+        for handle in [&mut layer.plotstyle_handle, &mut layer.material] {
+            if gone.contains(handle) {
+                *handle = Handle::NULL;
+            }
         }
     }
 }

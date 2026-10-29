@@ -546,6 +546,30 @@ impl ObjectType {
             _ => {}
         }
     }
+    /// The persistent reactors of the object, for the variants that keep them in a field (the
+    /// other objects' reactors are in `CadDocument::reactors_by_handle`).
+    pub(crate) fn reactors_mut(&mut self) -> Option<&mut Vec<Handle>> {
+        match self {
+            ObjectType::Dictionary(value) => Some(&mut value.reactors),
+            ObjectType::Layout(value) => Some(&mut value.reactors),
+            ObjectType::XRecord(value) => Some(&mut value.reactors),
+            ObjectType::PlotSettings(value) => Some(&mut value.reactors),
+            ObjectType::ObjectContextData(value) => Some(&mut value.reactors),
+            ObjectType::VisualStyle(value) => Some(&mut value.reactors),
+            ObjectType::Material(value) => Some(&mut value.reactors),
+            ObjectType::GeoData(value) => Some(&mut value.reactors),
+            ObjectType::DynamicBlock(value) => Some(&mut value.reactors),
+            ObjectType::Associative(value) => Some(&mut value.reactors),
+            ObjectType::ClassObject(value) => Some(&mut value.reactors),
+            ObjectType::DataObject(value) => Some(&mut value.reactors),
+            ObjectType::RegisteredClass(value) => Some(&mut value.reactors),
+            ObjectType::DgnLineStyle(value) => Some(&mut value.reactors),
+            ObjectType::ProxyObject(value) => Some(&mut value.reactors),
+            ObjectType::Arch(value) => Some(&mut value.reactors),
+            _ => None,
+        }
+    }
+
     /// Return the handle encoded in this object's payload.
     ///
     /// The document stores objects in a handle-indexed map, but decoded

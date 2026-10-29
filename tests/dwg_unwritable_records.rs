@@ -7,9 +7,9 @@
 use std::io::Cursor;
 
 use acadrust::classes::arch::ArchObject;
-use acadrust::entities::{EntityType, ExtendedEntityData};
+use acadrust::entities::{EntityType, ExtendedEntityData, Line};
 use acadrust::objects::ObjectType;
-use acadrust::types::DxfVersion;
+use acadrust::types::{DxfVersion, Handle, Vector3};
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader};
 
 /// A DXF with a line, an AutoCAD Architecture entity and an AutoCAD Architecture object: each
@@ -102,4 +102,73 @@ fn bytes_of_another_dwg_version_are_left_out_too() {
 #[test]
 fn a_drawing_with_nothing_unwritable_reports_nothing() {
     assert!(DwgWriter::omitted_records(&CadDocument::new()).is_empty());
+}
+
+/// A line, a layer and a dictionary that name the record the save leaves out as a reactor and as
+/// their plot style.
+fn referring_to_an_omitted_record() -> (CadDocument, Handle) {
+    let mut doc = CadDocument::new();
+    let root = doc.header.named_objects_dict_handle;
+    let omitted = doc.allocate_handle();
+    doc.objects.insert(
+        omitted,
+        ObjectType::Arch(ArchObject::new("AEC_WALL_STYLE", omitted, root)),
+    );
+    let mut line = Line::from_points(Vector3::ZERO, Vector3::new(5.0, 5.0, 0.0));
+    line.common.reactors = vec![omitted, root];
+    line.common.plotstyle_flags = 3;
+    line.common.plotstyle_handle = Some(omitted);
+    doc.add_entity(EntityType::Line(line)).expect("add line");
+    doc.layers
+        .iter_mut()
+        .next()
+        .expect("layer 0")
+        .plotstyle_handle = omitted;
+    let Some(ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&root) else {
+        panic!("no root dictionary")
+    };
+    dictionary.reactors = vec![omitted, root];
+    (doc, omitted)
+}
+
+#[test]
+fn what_is_left_names_no_omitted_record() {
+    let (doc, omitted) = referring_to_an_omitted_record();
+    let (bytes, report) = DwgWriter::write_to_vec_omitting_unwritable(&doc)
+        .expect("an omitted record stopped the save");
+    assert_eq!(report.len(), 1);
+    let back = DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg");
+
+    let line = back
+        .entities()
+        .find_map(|e| match e {
+            EntityType::Line(line) => Some(line),
+            _ => None,
+        })
+        .expect("the line is written");
+    assert!(!line.common.reactors.contains(&omitted), "line reactors");
+    assert!(
+        line.common
+            .reactors
+            .contains(&doc.header.named_objects_dict_handle),
+        "a reactor that is written stays"
+    );
+    // A plot style by object that lost its object is the plot style of its layer again.
+    assert_eq!(
+        (line.common.plotstyle_flags, line.common.plotstyle_handle),
+        (0, None)
+    );
+    assert_ne!(
+        back.layers.iter().next().expect("layer 0").plotstyle_handle,
+        omitted,
+        "layer plot style"
+    );
+    let Some(ObjectType::Dictionary(root)) =
+        back.objects.get(&doc.header.named_objects_dict_handle)
+    else {
+        panic!("no root dictionary")
+    };
+    assert!(!root.reactors.contains(&omitted), "dictionary reactors");
 }
