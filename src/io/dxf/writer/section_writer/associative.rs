@@ -433,9 +433,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     fn write_assoc_action_param(&mut self, value: &AssocActionParam) -> Result<()> {
         self.writer.write_subclass("AcDbAssocActionParam")?;
         self.writer.write_i16(90, value.is_r2013)?;
-        if self.dxf_version >= crate::types::DxfVersion::AC1027 {
-            self.writer.write_i32(90, value.version)?;
-        }
+        // Written for every declared release: a host can rewrite the release of the file, and the
+        // reader tells the layouts apart by the groups.
+        self.writer.write_i32(90, value.version)?;
         self.writer.write_string(1, &value.name)?;
         Ok(())
     }
