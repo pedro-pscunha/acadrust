@@ -4643,6 +4643,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_double(30, polyline.elevation)?;
 
         self.writer.write_i16(70, polyline.flags.bits() as i16)?;
+        if polyline.smooth_surface != SmoothSurfaceType::None {
+            self.writer.write_i16(75, polyline.smooth_surface as i16)?;
+        }
 
         if polyline.thickness != 0.0 {
             self.writer.write_double(39, polyline.thickness)?;
