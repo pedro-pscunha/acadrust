@@ -748,6 +748,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_header_variable("$DIMMZS", |w| w.write_string(6, &hdr.dim_mzs))?;
         }
 
+        self.write_dwg_header_variables(hdr)?;
+
         // === Misc ===
         self.write_header_variable("$SPLFRAME", |w| {
             w.write_i16(70, if hdr.spline_frame { 1 } else { 0 })
@@ -935,6 +937,136 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     /// Write a header variable
+    /// Header variables a DWG holds and the reader reads that the sections above do not write,
+    /// each from the DXF release that has it: paper space extents, limits and insertion base, the
+    /// user variables, the geographic location and the rest.
+    fn write_dwg_header_variables(&mut self, hdr: &crate::document::HeaderVariables) -> Result<()> {
+        use DxfVersion::{AC1015, AC1018, AC1021};
+        let version = self.dxf_version;
+        for (name, v) in [
+            ("$PINSBASE", hdr.paper_space_insertion_base),
+            ("$PEXTMIN", hdr.paper_space_extents_min),
+            ("$PEXTMAX", hdr.paper_space_extents_max),
+        ] {
+            self.write_header_variable(name, |w| {
+                w.write_double(10, v.x)?;
+                w.write_double(20, v.y)?;
+                w.write_double(30, v.z)
+            })?;
+        }
+        for (name, v) in [
+            ("$PLIMMIN", hdr.paper_space_limits_min),
+            ("$PLIMMAX", hdr.paper_space_limits_max),
+        ] {
+            self.write_header_variable(name, |w| {
+                w.write_double(10, v.x)?;
+                w.write_double(20, v.y)
+            })?;
+        }
+        // Group 70: integers.
+        for (name, since, v) in [
+            ("$USERI1", AC1015, hdr.user_int1),
+            ("$USERI2", AC1015, hdr.user_int2),
+            ("$USERI3", AC1015, hdr.user_int3),
+            ("$USERI4", AC1015, hdr.user_int4),
+            ("$USERI5", AC1015, hdr.user_int5),
+            ("$ISOLINES", AC1015, hdr.isolines),
+            ("$TEXTQLTY", AC1015, hdr.text_quality),
+            ("$CMLJUST", AC1015, hdr.multiline_justification),
+            ("$SHADEDGE", AC1015, hdr.shade_edge),
+            ("$SHADEDIF", AC1015, hdr.shade_diffuse),
+            ("$PROXYGRAPHICS", AC1015, hdr.proxy_graphics),
+            ("$TREEDEPTH", AC1015, hdr.tree_depth),
+            ("$DIMAZIN", AC1015, hdr.dim_alt_zero_suppression),
+            ("$LOFTPARAM", AC1021, hdr.loft_param),
+            ("$OBSCOLOR", AC1021, hdr.obscured_color),
+            ("$INTERSECTIONCOLOR", AC1021, hdr.intersection_color),
+        ] {
+            if version >= since {
+                self.write_header_variable(name, |w| w.write_i16(70, v))?;
+            }
+        }
+        // Group 70: flags.
+        for (name, v) in [
+            ("$LIMCHECK", hdr.limit_check),
+            ("$DIMASO", hdr.associate_dimensions),
+            ("$DIMSHO", hdr.update_dimensions_while_dragging),
+            ("$DIMUPT", hdr.dim_user_positioned_text),
+            ("$PELLIPSE", hdr.create_ellipse_as_polyline),
+            ("$USRTIMER", hdr.user_timer),
+        ] {
+            self.write_header_variable(name, |w| w.write_i16(70, i16::from(v)))?;
+        }
+        // Group 280: bytes.
+        for (name, since, v) in [
+            ("$SORTENTS", AC1015, hdr.sort_entities),
+            ("$INDEXCTL", AC1015, hdr.index_control),
+            ("$HIDETEXT", AC1018, hdr.hide_text),
+            ("$DIMASSOC", AC1018, hdr.dimension_associativity),
+            ("$HALOGAP", AC1021, hdr.halo_gap),
+            ("$OBSLTYPE", AC1021, hdr.obscured_linetype),
+            ("$INTERSECTIONDISPLAY", AC1021, hdr.intersection_display),
+            ("$ENDCAPS", AC1021, hdr.end_caps),
+            ("$JOINSTYLE", AC1021, hdr.join_style),
+            ("$CSHADOW", AC1021, hdr.cast_shadow),
+            ("$LOFTNORMALS", AC1021, hdr.loft_normals),
+        ] {
+            if version >= since {
+                self.write_header_variable(name, |w| w.write_byte(280, v.clamp(0, 255) as u8))?;
+            }
+        }
+        // Group 290: flags.
+        for (name, since, v) in [
+            ("$XEDIT", AC1015, hdr.xedit),
+            ("$EXTNAMES", AC1015, hdr.extended_names),
+            ("$OLESTARTUP", AC1015, hdr.ole_startup),
+            ("$CAMERADISPLAY", AC1021, hdr.camera_display),
+        ] {
+            if version >= since {
+                self.write_header_variable(name, |w| w.write_bool(290, v))?;
+            }
+        }
+        // Group 40: reals.
+        for (name, since, v) in [
+            ("$USERR1", AC1015, hdr.user_real1),
+            ("$USERR2", AC1015, hdr.user_real2),
+            ("$USERR3", AC1015, hdr.user_real3),
+            ("$USERR4", AC1015, hdr.user_real4),
+            ("$USERR5", AC1015, hdr.user_real5),
+            ("$FACETRES", AC1015, hdr.facet_resolution),
+            ("$CMLSCALE", AC1015, hdr.multiline_scale),
+            ("$CHAMFERC", AC1015, hdr.chamfer_length),
+            ("$CHAMFERD", AC1015, hdr.chamfer_angle),
+            ("$PSVPSCALE", AC1015, hdr.viewport_scale_factor),
+            ("$DIMALTRND", AC1015, hdr.dim_alt_rounding),
+            ("$TDUSRTIMER", AC1015, hdr.user_elapsed_time),
+            ("$SHADOWPLANELOCATION", AC1021, hdr.shadow_plane_location),
+            ("$LOFTANG1", AC1021, hdr.loft_angle1),
+            ("$LOFTANG2", AC1021, hdr.loft_angle2),
+            ("$LOFTMAG1", AC1021, hdr.loft_magnitude1),
+            ("$LOFTMAG2", AC1021, hdr.loft_magnitude2),
+            ("$LENSLENGTH", AC1021, hdr.lens_length),
+            ("$CAMERAHEIGHT", AC1021, hdr.camera_height),
+            ("$LATITUDE", AC1021, hdr.latitude),
+            ("$LONGITUDE", AC1021, hdr.longitude),
+            ("$NORTHDIRECTION", AC1021, hdr.north_direction),
+            ("$STEPSIZE", AC1021, hdr.step_size),
+            ("$STEPSPERSEC", AC1021, hdr.steps_per_second),
+        ] {
+            if version >= since {
+                self.write_header_variable(name, |w| w.write_double(40, v))?;
+            }
+        }
+        if version >= AC1021 {
+            let zone = i16::try_from(hdr.timezone).unwrap_or(0);
+            self.write_header_variable("$TIMEZONE", |w| w.write_i16(70, zone))?;
+        }
+        if !hdr.menu_name.is_empty() {
+            self.write_header_variable("$MENU", |w| w.write_string(1, &hdr.menu_name))?;
+        }
+        Ok(())
+    }
+
     fn write_header_variable<F>(&mut self, name: &str, write_value: F) -> Result<()>
     where
         F: FnOnce(&mut W) -> Result<()>,
