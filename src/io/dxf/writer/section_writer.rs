@@ -240,11 +240,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                         continue;
                     }
                 }
-                ObjectType::DynamicBlock(dynamic) => {
-                    // The bridge keeps the purge preventer, which BricsCAD's audit skips.
-                    if is_unrestorable_assoc_object(&dynamic.dxf_name) && !self.dwg_bridge {
-                        continue;
-                    }
+                // The bridge keeps the purge preventer, which BricsCAD's audit skips.
+                ObjectType::DynamicBlock(dynamic)
+                    if is_unrestorable_assoc_object(&dynamic.dxf_name) && !self.dwg_bridge =>
+                {
+                    continue;
                 }
                 _ => {}
             }
