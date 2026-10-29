@@ -6597,25 +6597,30 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     fn write_field_cell_value_dxf(&mut self, value: &CellValue) -> Result<()> {
-        self.write_cell_value_dxf_masked(value, 1, true)
+        let modern = self.dxf_version >= DxfVersion::AC1021 || self.dwg_bridge;
+        self.write_cell_value_dxf_masked(value, 1, true, modern)
     }
 
+    /// `modern`: the R2007 layout (flags before the type, unit and format after the body). The
+    /// DXF of a DWG bridge always has it: the reader tells the layouts apart by the groups, and a
+    /// host can declare another release than the one the file was written for.
     fn write_cell_value_dxf_masked(
         &mut self,
         value: &CellValue,
         body_mask: i32,
         point_size: bool,
+        modern: bool,
     ) -> Result<()> {
-        if self.dxf_version >= DxfVersion::AC1021 {
+        if modern {
             self.writer.write_i32(93, value.flags)?;
         }
-        let type_code = if self.dxf_version >= DxfVersion::AC1021 {
+        let type_code = if modern {
             value.type_code()
         } else {
             value.type_code() & !0x200
         };
         self.writer.write_i32(90, type_code)?;
-        if self.dxf_version < DxfVersion::AC1021 || (value.flags & body_mask) == 0 {
+        if !modern || (value.flags & body_mask) == 0 {
             match type_code {
                 0 | 1 => {
                     self.writer.write_i32(91, value.numeric_value as i32)?;
@@ -6676,7 +6681,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 _ => {}
             }
         }
-        if self.dxf_version >= DxfVersion::AC1021 {
+        if modern {
             let unit_code = value.unit_type_code();
             self.writer.write_i32(94, unit_code)?;
             self.writer.write_string(300, &value.format)?;
@@ -6703,7 +6708,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         for handle in &value.referenced_objects {
             self.writer.write_handle(331, *handle)?;
         }
-        if self.dxf_version < DxfVersion::AC1021 {
+        // The pre-R2007 format string: read from its group in every release, so a bridge keeps it
+        // whatever release the file declares.
+        if self.dwg_bridge {
+            if !value.format.is_empty() {
+                self.writer.write_string(4, &value.format)?;
+            }
+        } else if self.dxf_version < DxfVersion::AC1021 {
             self.writer.write_string(4, value.pre2007_format())?;
         }
         self.writer.write_i32(91, value.evaluation_option)?;
@@ -6728,8 +6739,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     fn write_field_value_dxf(&mut self, value: &CellValue) -> Result<()> {
-        self.write_cell_value_dxf_masked(value, 1, false)?;
-        if self.dxf_version >= DxfVersion::AC1021 {
+        let modern = self.dxf_version >= DxfVersion::AC1021 || self.dwg_bridge;
+        self.write_cell_value_dxf_masked(value, 1, false, modern)?;
+        if modern {
             self.writer.write_string(304, "ACVALUE_END")?;
         }
         Ok(())
@@ -7344,7 +7356,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             .write_string(1, &value.environment_image_filename)?;
         self.writer.write_string(1, &value.description)?;
         self.writer.write_i32(90, value.display_index)?;
-        if write_has_predefined && self.dxf_version >= DxfVersion::AC1027 {
+        if write_has_predefined && (self.dxf_version >= DxfVersion::AC1027 || self.dwg_bridge) {
             self.writer.write_bool(290, value.has_predefined)?;
         }
         Ok(())

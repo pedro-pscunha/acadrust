@@ -387,13 +387,12 @@ fn field_next_code<'a>(
     None
 }
 
-fn read_field_cell_value_dxf(
-    entries: &[(i32, String)],
-    cursor: &mut usize,
-    version: DxfVersion,
-) -> CellValue {
+/// Reads a field value. The groups tell the layout, never the declared DXF release (a host can
+/// rewrite the release of the file): a group 93 before the type is the flags of the R2007 layout,
+/// and the groups 94, 300, 302 and 304 after the body belong to it too.
+fn read_field_cell_value_dxf(entries: &[(i32, String)], cursor: &mut usize) -> CellValue {
     let mut value = CellValue::new();
-    if version >= DxfVersion::AC1021 && entries.get(*cursor).map(|entry| entry.0) == Some(93) {
+    if entries.get(*cursor).map(|entry| entry.0) == Some(93) {
         value.flags = entries[*cursor].1.parse().unwrap_or(0);
         *cursor += 1;
     }
@@ -403,8 +402,8 @@ fn read_field_cell_value_dxf(
     let type_code = type_text.parse::<u32>().unwrap_or(0);
     value.raw_type_code = type_code as i32;
     value.value_type = CellValueType::from(type_code);
-    // R2007+: flag bit 0 suppresses the value body (as in DWG).
-    if version < DxfVersion::AC1021 || (value.flags & 1) == 0 {
+    // Flag bit 0 suppresses the value body (as in DWG); the layout without flags has no bit set.
+    if (value.flags & 1) == 0 {
         match type_code {
             0 | 1 => {
                 value.numeric_value = field_next_code(entries, cursor, 91)
@@ -457,24 +456,22 @@ fn read_field_cell_value_dxf(
             _ => {}
         }
     }
-    if version >= DxfVersion::AC1021 {
-        if entries.get(*cursor).map(|entry| entry.0) == Some(94) {
-            value.raw_unit_type_code = entries[*cursor].1.parse().unwrap_or(0);
-            value.unit_type = ValueUnitType::from(value.raw_unit_type_code as u32);
-            *cursor += 1;
-        }
-        if entries.get(*cursor).map(|entry| entry.0) == Some(300) {
-            value.format = entries[*cursor].1.clone();
-            *cursor += 1;
-        }
-        if value.raw_unit_type_code != 12 && entries.get(*cursor).map(|entry| entry.0) == Some(302)
-        {
-            value.formatted_value = entries[*cursor].1.clone();
-            *cursor += 1;
-        }
-        if entries.get(*cursor).map(|entry| entry.0) == Some(304) {
-            *cursor += 1; // ACVALUE_END
-        }
+    if entries.get(*cursor).map(|entry| entry.0) == Some(94) {
+        value.raw_unit_type_code = entries[*cursor].1.parse().unwrap_or(0);
+        value.unit_type = ValueUnitType::from(value.raw_unit_type_code as u32);
+        *cursor += 1;
+    }
+    if entries.get(*cursor).map(|entry| entry.0) == Some(300) {
+        value.format = entries[*cursor].1.clone();
+        *cursor += 1;
+    }
+    if value.raw_unit_type_code != 12 && entries.get(*cursor).map(|entry| entry.0) == Some(302)
+    {
+        value.formatted_value = entries[*cursor].1.clone();
+        *cursor += 1;
+    }
+    if entries.get(*cursor).map(|entry| entry.0) == Some(304) {
+        *cursor += 1; // ACVALUE_END
     }
     value
 }
@@ -5889,11 +5886,7 @@ impl<'a> SectionReader<'a> {
         })
     }
 
-    fn read_class_object_dxf(
-        &mut self,
-        dxf_name: &str,
-        version: DxfVersion,
-    ) -> Result<ClassObject> {
+    fn read_class_object_dxf(&mut self, dxf_name: &str) -> Result<ClassObject> {
         let mut object = ClassObject::default();
         let mut fields = ClassDxfFields::default();
         let mut section = String::new();
@@ -6091,10 +6084,11 @@ impl<'a> SectionReader<'a> {
                     shadow_softness: fields.i16(section, 280) as u8,
                 })
             }
-            "RENDERSETTINGS" => ClassObjectData::RenderSettings(class_dxf_render_settings(
-                &mut fields,
-                version >= DxfVersion::AC1027,
-            )),
+            // The R2013 flag after the display index is read when the file holds it, whatever
+            // release the file declares.
+            "RENDERSETTINGS" => {
+                ClassObjectData::RenderSettings(class_dxf_render_settings(&mut fields, true))
+            }
             "MENTALRAYRENDERSETTINGS" => {
                 let base = class_dxf_render_settings(&mut fields, false);
                 let section = "AcDbMentalRayRenderSettings";
@@ -7306,7 +7300,7 @@ impl<'a> SectionReader<'a> {
                             }
                         }
                         "FIELD" | "ACDBFIELD" => {
-                            let obj = self.read_field_object_dxf(document.version)?;
+                            let obj = self.read_field_object_dxf()?;
                             document.fields.insert(
                                 obj.handle,
                                 crate::document::FieldDef {
@@ -7370,7 +7364,7 @@ impl<'a> SectionReader<'a> {
                                 .insert(object.handle, ObjectType::Associative(object));
                         }
                         name if is_class_object_name(name) => {
-                            let object = self.read_class_object_dxf(name, document.version)?;
+                            let object = self.read_class_object_dxf(name)?;
                             if let ClassObjectData::SectionViewStyle(style) = &object.data {
                                 document.section_view_style =
                                     Some(crate::entities::SectionViewStyle {
@@ -9731,7 +9725,7 @@ impl<'a> SectionReader<'a> {
         Ok(obj)
     }
 
-    fn read_field_object_dxf(&mut self, version: DxfVersion) -> Result<Field> {
+    fn read_field_object_dxf(&mut self) -> Result<Field> {
         let mut value = Field::default();
         let mut entries = Vec::new();
         while let Some(pair) = self.reader.read_pair()? {
@@ -9767,7 +9761,7 @@ impl<'a> SectionReader<'a> {
             value.code.push_str(&entries[cursor].1);
             cursor += 1;
         }
-        if version < DxfVersion::AC1021 && entries.get(cursor).map(|entry| entry.0) == Some(4) {
+        if entries.get(cursor).map(|entry| entry.0) == Some(4) {
             value.format = entries[cursor].1.clone();
             cursor += 1;
         }
@@ -9796,7 +9790,7 @@ impl<'a> SectionReader<'a> {
             cursor += 1;
         }
         // Pre-R2007 format string sits after the object list.
-        if version < DxfVersion::AC1021 && entries.get(cursor).map(|entry| entry.0) == Some(4) {
+        if entries.get(cursor).map(|entry| entry.0) == Some(4) {
             value.format = entries[cursor].1.clone();
             cursor += 1;
         }
@@ -9823,13 +9817,10 @@ impl<'a> SectionReader<'a> {
         // key. Files from older writers of this library put the field value
         // inline right here instead (R2007+: 93 flags + 90 type; earlier: 90).
         let code_at = |i: usize| entries.get(i).map(|entry| entry.0);
-        let inline_value = if version >= DxfVersion::AC1021 {
-            code_at(cursor) == Some(93) && code_at(cursor + 1) == Some(90)
-        } else {
-            code_at(cursor) == Some(90)
-        };
+        let inline_value = code_at(cursor) == Some(90)
+            || (code_at(cursor) == Some(93) && code_at(cursor + 1) == Some(90));
         if inline_value {
-            value.value = read_field_cell_value_dxf(&entries, &mut cursor, version);
+            value.value = read_field_cell_value_dxf(&entries, &mut cursor);
         }
         let child_value_count = if entries.get(cursor).map(|entry| entry.0) == Some(93) {
             let count = entries[cursor].1.parse::<usize>().unwrap_or(0).min(20_000);
@@ -9844,12 +9835,12 @@ impl<'a> SectionReader<'a> {
                 .to_string();
             value.child_values.push(FieldChildValue {
                 key,
-                value: read_field_cell_value_dxf(&entries, &mut cursor, version),
+                value: read_field_cell_value_dxf(&entries, &mut cursor),
             });
         }
         if !inline_value && entries.get(cursor).map(|entry| entry.0) == Some(7) {
             cursor += 1; // ACFD_FIELD_VALUE
-            value.value = read_field_cell_value_dxf(&entries, &mut cursor, version);
+            value.value = read_field_cell_value_dxf(&entries, &mut cursor);
         }
         if entries.get(cursor).map(|entry| entry.0) == Some(301) {
             value.value_string = entries[cursor].1.clone();
