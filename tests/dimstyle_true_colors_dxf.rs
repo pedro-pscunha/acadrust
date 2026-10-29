@@ -3,7 +3,8 @@
 //! (176, 177, 178, 70), so a true color came back from DXF as its nearest ACI color. acadrust
 //! writes private groups next to them for DXF R2004 and later (the DWG's CMC colors exist from
 //! then): 421 DIMCLRD, 422 DIMCLRE, 423 DIMCLRT, 424 DIMTFILLCLR, each a packed 0xRRGGBB like
-//! group 420.
+//! group 420. They are private, so only the DWG bridge writer (`DxfWriter::for_dwg_bridge`)
+//! writes them: a DXF that AutoCAD opens holds only the groups the DXF Reference defines.
 
 use std::io::Cursor;
 
@@ -51,7 +52,10 @@ fn styled(version: DxfVersion) -> CadDocument {
 }
 
 fn through_dxf(doc: &CadDocument) -> CadDocument {
-    let bytes = DxfWriter::new(doc).write_to_vec().expect("write dxf");
+    let bytes = DxfWriter::new(doc)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
     DxfReader::from_reader(Cursor::new(bytes))
         .expect("reader")
         .read()
@@ -129,25 +133,59 @@ fn true_colors_survive_dxf_to_dwg_to_dxf() {
     }
 }
 
-#[test]
-fn an_older_dxf_gets_no_private_groups() {
-    let text = String::from_utf8(
-        DxfWriter::new(&styled(DxfVersion::AC1015))
-            .write_to_vec()
-            .expect("write"),
-    )
-    .expect("utf8");
+/// The group codes of every DIMSTYLE record in `bytes`.
+fn dimstyle_codes(bytes: Vec<u8>) -> Vec<Vec<i32>> {
+    let text = String::from_utf8(bytes).expect("utf8");
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
-    let at = lines.iter().position(|l| *l == "Tint").expect("style");
-    let record: Vec<&str> = lines[at..]
-        .chunks(2)
-        .take_while(|p| p[0] != "0")
-        .map(|p| p[0])
-        .collect();
-    assert!(
-        record
-            .iter()
-            .all(|c| !matches!(*c, "421" | "422" | "423" | "424")),
-        "{record:?}"
-    );
+    let mut records: Vec<Vec<i32>> = Vec::new();
+    let mut in_style = false;
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { break };
+        let code: i32 = code.parse().expect("group code");
+        if code == 0 {
+            in_style = *value == "DIMSTYLE";
+            if in_style {
+                records.push(Vec::new());
+            }
+        } else if in_style {
+            records.last_mut().expect("record").push(code);
+        }
+    }
+    records
+}
+
+#[test]
+fn the_default_dxf_gets_no_private_groups() {
+    for version in [
+        DxfVersion::AC1015,
+        DxfVersion::AC1018,
+        DxfVersion::AC1021,
+        DxfVersion::AC1024,
+        DxfVersion::AC1032,
+    ] {
+        let bytes = DxfWriter::new(&styled(version))
+            .write_to_vec()
+            .expect("write");
+        let records = dimstyle_codes(bytes);
+        assert!(records.len() >= 2, "{version:?}: no DIMSTYLE records");
+        for record in records {
+            assert!(
+                record.iter().all(|c| !matches!(*c, 421 | 422 | 423 | 424)),
+                "{version:?}: {record:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_bridge_dxf_writes_the_true_color_groups() {
+    let bytes = DxfWriter::new(&styled(DxfVersion::AC1032))
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write");
+    let tint = dimstyle_codes(bytes)
+        .into_iter()
+        .find(|r| r.contains(&421))
+        .expect("a record with the true colors");
+    assert!([421, 422, 423, 424].iter().all(|c| tint.contains(c)));
 }

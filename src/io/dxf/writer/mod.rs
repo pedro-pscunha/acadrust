@@ -169,8 +169,10 @@ impl<'a> DxfWriter<'a> {
 
     /// Write the private records of a DWG to DXF to DWG bridge, for a DXF that only a host and
     /// [`DxfReader`](crate::DxfReader) read, never AutoCAD: objects that exist only as DWG bytes
-    /// (such as the AutoCAD Architecture display configuration) and the dynamic block purge
-    /// preventer, which a normal DXF leaves out.
+    /// (such as the AutoCAD Architecture display configuration), the dynamic block purge
+    /// preventer, which a normal DXF leaves out, and the groups that the DXF Reference does not
+    /// define for a record (such as the true colors and zero suppression of a DIMSTYLE). A normal
+    /// DXF holds only the groups the Reference defines, so AutoCAD opens it.
     pub fn for_dwg_bridge(mut self) -> Self {
         self.dwg_bridge = true;
         self

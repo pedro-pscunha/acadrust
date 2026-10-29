@@ -1,7 +1,8 @@
 //! The R2010 dimension zero-suppression variables (DIMMZF, DIMMZS, DIMALTMZF, DIMALTMZS) in a
 //! DIMSTYLE record and in the HEADER section survive the DXF bridge. A DWG keeps them per style;
 //! AutoCAD's DXF Reference has no group code for them, so acadrust writes its own:
-//! 51 DIMMZF, 52 DIMALTMZF, 300 DIMMZS, 301 DIMALTMZS (free in a DIMSTYLE record).
+//! 51 DIMMZF, 52 DIMALTMZF, 300 DIMMZS, 301 DIMALTMZS (free in a DIMSTYLE record). They are
+//! private, so only the DWG bridge writer (`DxfWriter::for_dwg_bridge`) writes them.
 
 use std::io::Cursor;
 
@@ -45,7 +46,10 @@ fn check_header(doc: &CadDocument, what: &str) {
 }
 
 fn through_dxf(doc: &CadDocument) -> CadDocument {
-    let bytes = DxfWriter::new(doc).write_to_vec().expect("write dxf");
+    let bytes = DxfWriter::new(doc)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
     DxfReader::from_reader(Cursor::new(bytes))
         .expect("reader")
         .read()
@@ -82,6 +86,7 @@ fn a_style_without_the_groups_reads_as_autocads_default() {
     // AutoCAD's own DXF never carries them; a DWG made from such a style holds 100, as the
     // drawings AutoCAD saves do.
     let bytes = DxfWriter::new(&styled(DxfVersion::AC1032))
+        .for_dwg_bridge()
         .write_to_vec()
         .expect("write dxf");
     let text = String::from_utf8(bytes).expect("utf8");
@@ -107,4 +112,60 @@ fn a_style_without_the_groups_reads_as_autocads_default() {
     let s = doc.dim_styles.get("Zeros").expect("style");
     assert_eq!((s.dimmzf, s.dimaltmzf), (100.0, 100.0));
     assert_eq!((s.dimmzs.as_str(), s.dimaltmzs.as_str()), ("", ""));
+}
+
+/// The group codes of every DIMSTYLE record in `bytes`.
+fn dimstyle_codes(bytes: Vec<u8>) -> Vec<Vec<i32>> {
+    let text = String::from_utf8(bytes).expect("utf8");
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let mut records: Vec<Vec<i32>> = Vec::new();
+    let mut in_style = false;
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { break };
+        let code: i32 = code.parse().expect("group code");
+        if code == 0 {
+            in_style = *value == "DIMSTYLE";
+            if in_style {
+                records.push(Vec::new());
+            }
+        } else if in_style {
+            records.last_mut().expect("record").push(code);
+        }
+    }
+    records
+}
+
+#[test]
+fn the_default_dxf_gets_no_private_dimstyle_groups() {
+    for version in [
+        DxfVersion::AC1018,
+        DxfVersion::AC1021,
+        DxfVersion::AC1024,
+        DxfVersion::AC1032,
+    ] {
+        let bytes = DxfWriter::new(&styled(version))
+            .write_to_vec()
+            .expect("write");
+        let records = dimstyle_codes(bytes);
+        assert!(records.len() >= 2, "{version:?}: no DIMSTYLE records");
+        for record in records {
+            assert!(
+                record.iter().all(|c| !matches!(*c, 51 | 52 | 300 | 301)),
+                "{version:?}: {record:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_bridge_dxf_writes_the_zero_suppression_groups() {
+    let bytes = DxfWriter::new(&styled(DxfVersion::AC1032))
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write");
+    let zeros = dimstyle_codes(bytes)
+        .into_iter()
+        .find(|r| r.contains(&300))
+        .expect("a record with the groups");
+    assert!([51, 52, 300, 301].iter().all(|c| zeros.contains(c)));
 }
