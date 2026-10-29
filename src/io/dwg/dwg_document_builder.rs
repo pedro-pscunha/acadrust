@@ -2496,7 +2496,7 @@ impl DwgDocumentBuilder {
                                     Some(crate::entities::polygon_mesh::PolygonMeshVertex {
                                         common: c,
                                         location: d.position,
-                                        flags: 0,
+                                        flags: i16::from(d.flags),
                                     })
                                 } else {
                                     None
