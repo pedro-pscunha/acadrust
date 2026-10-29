@@ -52,7 +52,24 @@ fn sanitize_symbol_name(name: &str) -> String {
 ///
 /// A polyline whose VERTEX or SEQEND records carry data of their own (a layer, color, XDATA, an
 /// extension dictionary...) keeps the legacy form too, as LWPOLYLINE has no child records.
-pub(crate) fn polyline2d_downsaves_to_lwpolyline(polyline: &Polyline2D) -> bool {
+///
+/// A polyline whose VERTEX or SEQEND records another record names (an XRECORD group 340, a
+/// dictionary entry, a reactor: `named`, see [`named_handles`]) keeps the legacy form as well, so
+/// the reference still names a record of the file.
+pub(crate) fn polyline2d_downsaves_to_lwpolyline(
+    polyline: &Polyline2D,
+    named: &HashSet<Handle>,
+) -> bool {
+    let children = polyline
+        .vertices
+        .iter()
+        .map(|vertex| vertex.handle)
+        .chain(polyline.seqend.iter().map(|seqend| seqend.handle));
+    for child in children {
+        if named.contains(&child) {
+            return false;
+        }
+    }
     (polyline.flags.bits() & !0x81) == 0
         && polyline.smooth_surface == SmoothSurfaceType::None
         && polyline
@@ -63,6 +80,31 @@ pub(crate) fn polyline2d_downsaves_to_lwpolyline(polyline: &Polyline2D) -> bool 
             seqend.layer == polyline.common.layer
                 && !crate::entities::polyline::child_has_data(seqend, &polyline.common)
         })
+}
+
+/// The handles that the objects of a document name: the handle values of the XRECORDs, the
+/// entries of the dictionaries and the reactors kept beside the objects.
+pub(crate) fn named_handles(document: &CadDocument) -> HashSet<Handle> {
+    let mut named = HashSet::new();
+    for object in document.objects.values() {
+        match object {
+            ObjectType::XRecord(record) => {
+                for entry in &record.entries {
+                    if let crate::objects::XRecordValue::Handle(handle) = &entry.value {
+                        named.insert(*handle);
+                    }
+                }
+            }
+            ObjectType::Dictionary(dictionary) => {
+                named.extend(dictionary.entries.iter().map(|(_, handle)| *handle));
+            }
+            _ => {}
+        }
+    }
+    for reactors in document.reactors_by_handle.values() {
+        named.extend(reactors.iter().copied());
+    }
+    named
 }
 
 /// Legacy application objects that have no complete DXF representation.
@@ -233,6 +275,8 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     source_dwg_context: Option<(DxfVersion, u8)>,
     /// Write a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of an LWPOLYLINE.
     keep_heavy_polylines: bool,
+    /// The handles that the objects of the document name (see [`named_handles`]).
+    named_handles: HashSet<Handle>,
     /// Write the private records of a DWG to DXF to DWG bridge (see `DxfWriter::for_dwg_bridge`).
     dwg_bridge: bool,
 }
@@ -260,6 +304,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             loft_reference_appid: None,
             source_dwg_context: None,
             keep_heavy_polylines: false,
+            named_handles: HashSet::new(),
             dwg_bridge: false,
         }
     }
@@ -308,6 +353,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             document.dwg_source_version.unwrap_or(document.version),
             document.maintenance_version,
         ));
+        self.named_handles = named_handles(document);
         let mut set = HashSet::new();
         // Object handles — but EXCLUDE unsupported objects read from DWG that
         // have no DXF representation (Unknown with no raw_dxf_codes):
@@ -397,7 +443,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 EntityType::Polyline2D(polyline)
                     if self.dxf_version < DxfVersion::AC1015
                         || self.keep_heavy_polylines
-                        || !polyline2d_downsaves_to_lwpolyline(polyline) =>
+                        || !polyline2d_downsaves_to_lwpolyline(polyline, &self.named_handles) =>
                 {
                     let vertices = polyline.vertices.iter().map(|v| v.handle);
                     let seqend = polyline.seqend.iter().map(|s| s.handle);
@@ -4825,7 +4871,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // applications flag the resurrected VERTEX owner wiring on save.
         if self.dxf_version >= DxfVersion::AC1015
             && !self.keep_heavy_polylines
-            && polyline2d_downsaves_to_lwpolyline(polyline)
+            && polyline2d_downsaves_to_lwpolyline(polyline, &self.named_handles)
         {
             return self.write_polyline2d_as_lwpolyline(polyline, owner);
         }

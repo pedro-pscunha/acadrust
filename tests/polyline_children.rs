@@ -311,3 +311,79 @@ fn a_plain_dxf_to_dwg_keeps_the_children() {
         assert_eq!(children(&back), wanted(kind), "{kind:?}");
     }
 }
+
+/// A plain 2D POLYLINE whose VERTEX records and SEQEND have nothing of their own, and, when
+/// `reference` is set, an XRECORD whose group 340 names the second vertex and the SEQEND.
+fn plain_source(reference: bool) -> String {
+    let xrecord = if reference {
+        format!(
+            "0\nXRECORD\n5\n{XRECORD:X}\n330\nC\n100\nAcDbXrecord\n280\n1\n340\n702\n340\n7F0\n"
+        )
+    } else {
+        String::new()
+    };
+    let vertex = |handle: u64, x: i32| {
+        format!(
+            "0\nVERTEX\n5\n{handle:X}\n330\n{POLYLINE:X}\n100\nAcDbEntity\n8\n0\n100\nAcDbVertex\n100\nAcDb2dVertex\n10\n{x}.0\n20\n0.0\n30\n0.0\n70\n0\n"
+        )
+    };
+    format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n\
+0\nPOLYLINE\n5\n{POLYLINE:X}\n100\nAcDbEntity\n8\n0\n100\nAcDb2dPolyline\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n70\n0\n\
+{}{}{}\
+0\nSEQEND\n5\n7F0\n330\n{POLYLINE:X}\n100\nAcDbEntity\n8\n0\n\
+0\nENDSEC\n\
+0\nSECTION\n2\nOBJECTS\n{xrecord}0\nENDSEC\n0\nEOF\n",
+        vertex(0x701, 0),
+        vertex(0x702, 10),
+        vertex(0x703, 20),
+    )
+}
+
+/// The record types of a DXF's ENTITIES section and the 5 values of its VERTEX and SEQEND records.
+fn entity_records(bytes: &[u8]) -> (Vec<String>, Vec<String>) {
+    let text = String::from_utf8(bytes.to_vec()).expect("utf8");
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let (mut kinds, mut child_handles) = (Vec::new(), Vec::new());
+    let mut in_entities = false;
+    let mut child = false;
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { break };
+        match (*code, *value) {
+            ("2", "ENTITIES") => in_entities = true,
+            ("0", "ENDSEC") => in_entities = false,
+            ("0", kind) if in_entities => {
+                kinds.push(kind.to_string());
+                child = matches!(kind, "VERTEX" | "SEQEND");
+            }
+            ("5", handle) if in_entities && child => child_handles.push(handle.to_string()),
+            _ => {}
+        }
+    }
+    (kinds, child_handles)
+}
+
+#[test]
+fn a_default_dxf_keeps_the_children_that_an_xrecord_names() {
+    let doc = read(plain_source(true).into_bytes());
+    let bytes = DxfWriter::new(&doc).write_to_vec().expect("write dxf");
+    let (kinds, handles) = entity_records(&bytes);
+    assert!(kinds.iter().any(|k| k == "POLYLINE"), "{kinds:?}");
+    assert!(!kinds.iter().any(|k| k == "LWPOLYLINE"), "{kinds:?}");
+    // The group 340 values name records of the file.
+    for link in xrecord_links(&bytes) {
+        assert!(
+            handles.contains(&link),
+            "{link} is not a child: {handles:?}"
+        );
+    }
+}
+
+#[test]
+fn a_default_dxf_still_down_saves_a_polyline_nothing_names() {
+    let doc = read(plain_source(false).into_bytes());
+    let bytes = DxfWriter::new(&doc).write_to_vec().expect("write dxf");
+    let (kinds, _) = entity_records(&bytes);
+    assert!(kinds.iter().any(|k| k == "LWPOLYLINE"), "{kinds:?}");
+}

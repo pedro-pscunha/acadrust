@@ -353,6 +353,7 @@ impl<'a> DxfWriter<'a> {
             document,
             SectionWriter::<W>::writable_version(output_version),
             self.keep_heavy_polylines,
+            &section_writer::named_handles(document),
         );
         let handle_seed = handle_start + extra_handles + 1;
         let mut section_writer = SectionWriter::new(writer, handle_start, handle_seed);
@@ -414,6 +415,7 @@ fn count_extra_handles(
     document: &CadDocument,
     version: crate::types::DxfVersion,
     keep_heavy_polylines: bool,
+    named: &std::collections::HashSet<crate::types::Handle>,
 ) -> u64 {
     let mut count = 0u64;
 
@@ -428,7 +430,7 @@ fn count_extra_handles(
                 // which emits no child records (see SectionWriter).
                 if version >= crate::types::DxfVersion::AC1015
                     && !keep_heavy_polylines
-                    && section_writer::polyline2d_downsaves_to_lwpolyline(polyline)
+                    && section_writer::polyline2d_downsaves_to_lwpolyline(polyline, named)
                 {
                     continue;
                 }
