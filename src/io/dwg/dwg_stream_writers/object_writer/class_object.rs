@@ -45,10 +45,12 @@ impl<'a> DwgObjectWriter<'a> {
         rapid_rt: bool,
         write_predefined_bit: bool,
     ) {
+        // The class version is stored as the model holds it, which is the value of AutoCAD's own
+        // DXF (group 90): its R2018 DWG stores 2 for a MENTALRAYRENDERSETTINGS as its DXF has 2,
+        // and AutoCAD discards an object whose class version is one more. Only the RapidRT
+        // objects of an R2013 DWG store one less than their DXF.
         let class_version = if rapid_rt && self.dxf_version == crate::types::DxfVersion::AC1027 {
             value.class_version - 1
-        } else if !rapid_rt && self.version.r2013_plus(self.dxf_version) {
-            value.class_version + 1
         } else {
             value.class_version
         };
@@ -939,5 +941,86 @@ impl<'a> DwgObjectWriter<'a> {
                 self.writer.write_bit_short(value.class_version);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod render_settings_class_version_tests {
+    use crate::classes::DxfClass;
+    use crate::document::CadDocument;
+    use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+    use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
+    use crate::objects::{
+        ClassObject, ClassObjectData, MentalRayRenderSettings, ObjectType, RapidRtRenderSettings,
+        RenderSettings,
+    };
+    use crate::types::DxfVersion;
+
+    /// The class version that the DWG stores in the object body of a render settings object whose
+    /// `class_version` is `class_version`: the first value after the common header.
+    fn stored_class_version(version: DxfVersion, rapid_rt: bool, class_version: i32) -> i32 {
+        let mut document = CadDocument::with_version(version);
+        let (name, class) = if rapid_rt {
+            ("RAPIDRTRENDERSETTINGS", "AcDbRapidRTRenderSettings")
+        } else {
+            ("MENTALRAYRENDERSETTINGS", "AcDbMentalRayRenderSettings")
+        };
+        document.classes.add_or_update(DxfClass::new(name, class));
+        let handle = document.allocate_handle();
+        let owner = document.header.named_objects_dict_handle;
+        let base = RenderSettings {
+            class_version,
+            name: "Medium".into(),
+            ..Default::default()
+        };
+        let data = if rapid_rt {
+            ClassObjectData::RapidRtRenderSettings(RapidRtRenderSettings {
+                base,
+                ..Default::default()
+            })
+        } else {
+            ClassObjectData::MentalRayRenderSettings(MentalRayRenderSettings {
+                base,
+                ..Default::default()
+            })
+        };
+        document.objects.insert(
+            handle,
+            ObjectType::ClassObject(ClassObject {
+                handle,
+                owner,
+                data,
+                ..Default::default()
+            }),
+        );
+        let (bytes, handles, _, _) = DwgObjectWriter::new(&document).unwrap().write();
+        let at = handles
+            .iter()
+            .find(|(h, _)| *h == handle.value())
+            .map(|(_, at)| i64::from(*at))
+            .expect("the object is written");
+        let reader = DwgObjectReader::new(
+            bytes,
+            version,
+            handles
+                .into_iter()
+                .map(|(h, at)| (h, i64::from(at)))
+                .collect(),
+        )
+        .unwrap();
+        let (type_code, mut merged) = reader.read_record_at(at as usize).unwrap();
+        reader.read_common_non_entity_data(&mut merged, type_code);
+        merged.read_bit_long()
+    }
+
+    /// AutoCAD's own DXF of a drawing (R2018) has `90 2` in a MENTALRAYRENDERSETTINGS and in a
+    /// RAPIDRTRENDERSETTINGS, and its DWG stores 2: the class version is not changed on the way to
+    /// the DWG. AutoCAD discards a render settings object whose class version it does not know.
+    #[test]
+    fn the_class_version_is_stored_as_it_is() {
+        for version in [DxfVersion::AC1027, DxfVersion::AC1032] {
+            assert_eq!(stored_class_version(version, false, 2), 2, "{version:?}");
+        }
+        assert_eq!(stored_class_version(DxfVersion::AC1032, true, 2), 2);
     }
 }
