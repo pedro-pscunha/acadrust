@@ -86,13 +86,16 @@ impl BinaryRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CompoundFile {
     pub minor_version: u16,
     pub major_version: u16,
     pub transaction_signature: u32,
     pub root: CompoundStorage,
+    /// The bytes the file was read from, written again while its content is unchanged.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub source: Option<CompoundSource>,
 }
 
 impl Default for CompoundFile {
@@ -102,7 +105,37 @@ impl Default for CompoundFile {
             major_version: 3,
             transaction_signature: 0,
             root: CompoundStorage::root(),
+            source: None,
         }
+    }
+}
+
+/// The bytes a compound file was read from and a fingerprint of its content as read. AutoCAD
+/// keeps an embedded object's bytes as they are; a file built again from its content puts its
+/// sectors elsewhere, so an unchanged file is written from these bytes instead.
+#[derive(Debug, Clone)]
+pub struct CompoundSource {
+    bytes: std::sync::Arc<[u8]>,
+    /// Length and hash of the file built from its content when it was read.
+    content: (usize, u64),
+}
+
+impl CompoundSource {
+    fn fingerprint(built: &[u8]) -> (usize, u64) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        built.hash(&mut h);
+        (built.len(), h.finish())
+    }
+}
+
+/// Where a file was read from does not change what it holds.
+impl PartialEq for CompoundFile {
+    fn eq(&self, other: &Self) -> bool {
+        self.minor_version == other.minor_version
+            && self.major_version == other.major_version
+            && self.transaction_signature == other.transaction_signature
+            && self.root == other.root
     }
 }
 
@@ -293,19 +326,28 @@ impl CompoundFile {
             .sector_size
             .checked_mul(1 + sector_count)?
             .min(data.len());
-        Some((
-            Self {
-                minor_version: read_u16(data, 24)?,
-                major_version: read_u16(data, 26)?,
-                transaction_signature: read_u32(data, 52)?,
-                root,
-            },
-            consumed,
-        ))
+        let mut file = Self {
+            minor_version: read_u16(data, 24)?,
+            major_version: read_u16(data, 26)?,
+            transaction_signature: read_u32(data, 52)?,
+            root,
+            source: None,
+        };
+        let content = CompoundSource::fingerprint(&CompoundEncoder::new(&file).encode());
+        file.source = Some(CompoundSource {
+            bytes: data.get(..consumed)?.into(),
+            content,
+        });
+        Some((file, consumed))
     }
 
+    /// The file as read while its content is unchanged, else built from its content.
     pub fn encode(&self) -> Vec<u8> {
-        CompoundEncoder::new(self).encode()
+        let built = CompoundEncoder::new(self).encode();
+        match &self.source {
+            Some(s) if s.content == CompoundSource::fingerprint(&built) => s.bytes.to_vec(),
+            _ => built,
+        }
     }
 }
 
@@ -541,23 +583,32 @@ impl<'a> CompoundDecoder<'a> {
                 &self.mini_fat,
                 self.mini_fat.len() + 1,
                 |index| {
-                    let offset = index as usize * self.mini_sector_size;
-                    self.mini_stream
-                        .get(offset..offset + self.mini_sector_size)
-                        .map(|bytes| bytes.to_vec())
+                    sector(
+                        &self.mini_stream,
+                        index as usize * self.mini_sector_size,
+                        self.mini_sector_size,
+                    )
                 },
             )
         } else {
             read_chain(entry.start, &self.fat, self.fat.len() + 1, |index| {
-                let offset = (index as usize + 1) * self.sector_size;
-                self.data
-                    .get(offset..offset + self.sector_size)
-                    .map(|bytes| bytes.to_vec())
+                sector(
+                    self.data,
+                    (index as usize + 1) * self.sector_size,
+                    self.sector_size,
+                )
             })
         };
         output.truncate(size);
         output
     }
+}
+
+/// A stream sector's bytes. Other programs end a file right after its last stream byte, so the
+/// last sector can be short: its bytes are the stream's (the stream size cuts the rest).
+fn sector(data: &[u8], offset: usize, size: usize) -> Option<Vec<u8>> {
+    let bytes = data.get(offset..)?;
+    (!bytes.is_empty()).then(|| bytes[..bytes.len().min(size)].to_vec())
 }
 
 fn read_chain<F>(start: u32, allocation: &[u32], limit: usize, mut read: F) -> Vec<u8>

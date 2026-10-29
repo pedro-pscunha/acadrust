@@ -164,6 +164,7 @@ impl Ole2Frame {
     }
 
     pub fn encoded_payload(&self) -> Vec<u8> {
+        let storage = self.storage.encode();
         let mut output = match &self.envelope {
             OleFrameEnvelope::None => Vec::new(),
             OleFrameEnvelope::Legacy { records } => {
@@ -197,10 +198,14 @@ impl Ole2Frame {
                 bytes.extend_from_slice(&crate::compound_file::BinaryRecord::join(
                     extension_records,
                 ));
+                // The 128-byte wrapper ends with the length of the data after it.
+                if let (128, Ok(len)) = (bytes.len(), u32::try_from(storage.len())) {
+                    bytes[124..128].copy_from_slice(&len.to_le_bytes());
+                }
                 bytes
             }
         };
-        output.extend_from_slice(&self.storage.encode());
+        output.extend_from_slice(&storage);
         output
     }
 }
