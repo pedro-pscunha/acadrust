@@ -4279,14 +4279,15 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(60, 1)?;
         }
 
-        // Plot style (R2000+): the type (380: 1 by block, 2 default, 3 by object) and, for an
-        // object, its handle (390), which only a record the file keeps can be.
+        // Plot style (R2000+): for an object, its handle (390), which only a record the file keeps
+        // can be. The type (380: 1 by block, 2 default, 3 by object) is not an entity group in
+        // the Autodesk reference, so only a DWG bridge writes it.
         if self.dxf_version >= DxfVersion::AC1015 && common.plotstyle_flags != 0 {
             let style = common.plotstyle_handle.filter(|handle| {
                 !handle.is_null()
                     && (self.valid_handles.is_empty() || self.valid_handles.contains(handle))
             });
-            if common.plotstyle_flags != 3 || style.is_some() {
+            if self.dwg_bridge && (common.plotstyle_flags != 3 || style.is_some()) {
                 self.writer
                     .write_i16(380, i16::from(common.plotstyle_flags))?;
             }
