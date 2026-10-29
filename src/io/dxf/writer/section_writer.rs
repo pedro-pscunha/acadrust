@@ -259,9 +259,22 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     /// The handles after the class data of `object`'s DWG bytes, when it has bytes and no DXF form.
+    /// A host's override (an Arch object a bridge DXF gave back, with the handles the host left)
+    /// replaces the parsed handles when it has as many of them.
     fn raw_dwg_references(&self, object: &ObjectType) -> Option<Vec<ProxyObjectReference>> {
         let (data, bits, version) = raw_dwg_parts(object)?;
-        DwgObjectWriter::raw_record_references(data, bits, version.unwrap_or(self.dxf_version))
+        let parsed = DwgObjectWriter::raw_record_references(
+            data,
+            bits,
+            version.unwrap_or(self.dxf_version),
+        )?;
+        match object {
+            ObjectType::Arch(arch) => match &arch.raw_dwg_references {
+                Some(references) if references.len() == parsed.len() => Some(references.clone()),
+                _ => Some(parsed),
+            },
+            _ => Some(parsed),
+        }
     }
 
     /// Build the set of all handles that will appear in the output DXF.

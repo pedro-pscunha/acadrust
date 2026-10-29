@@ -296,6 +296,13 @@ fn a_host_that_renumbers_handles_is_followed_into_the_class_data() {
         panic!("Arch object lost")
     };
     assert_eq!(now.raw_dwg_references.as_ref().unwrap()[0].handle, moved);
+    // A second bridge DXF, written from the document the host's DXF gave, keeps the new handle
+    // (the bytes of the record still hold the old one).
+    let second = bridged(&back);
+    let Some(ObjectType::Arch(again)) = second.objects.get(&f.arch) else {
+        panic!("Arch object lost in the second bridge")
+    };
+    assert_eq!(again.raw_dwg_references.as_ref().unwrap()[0].handle, moved);
     // The DWG holds the new handle in the class data's handle stream.
     let bytes = DwgWriter::write_to_vec(&back).expect("write dwg");
     let again = DwgReader::from_stream(Cursor::new(bytes))
