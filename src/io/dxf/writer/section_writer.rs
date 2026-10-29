@@ -12868,11 +12868,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
         // Write vertices with proper subclass markers
         for vertex in &mesh.vertices {
-            // A vertex with no color of its own takes the mesh's, so CAD doesn't flag a mismatch.
-            let mut own = vertex.common.clone();
-            if own.color == Color::ByLayer {
-                own.color = mesh.common.color;
-            }
+            // A vertex with nothing of its own takes the mesh's color, linetype, lineweight and
+            // linetype scale, so CAD doesn't flag a mismatch.
+            let own = crate::entities::polyline::mesh_vertex_common(&vertex.common, &mesh.common);
             let child = self.write_polyline_child(
                 "VERTEX",
                 &mesh.common,

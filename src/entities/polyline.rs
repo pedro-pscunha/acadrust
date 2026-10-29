@@ -160,6 +160,28 @@ pub(crate) fn child_common(
     child
 }
 
+/// The common data a writer gives a vertex of a polygon mesh, whose `common` always exists: the
+/// vertex's own, with the mesh's color, linetype, lineweight and linetype scale where the vertex
+/// has only the defaults (AutoCAD keeps them equal and AUDIT reports any other value). A vertex
+/// cannot tell an own override from an absent one, so a default value is taken as absent.
+pub(crate) fn mesh_vertex_common(vertex: &EntityCommon, parent: &EntityCommon) -> EntityCommon {
+    let mut own = vertex.clone();
+    if own.color == crate::types::Color::ByLayer {
+        own.color = parent.color;
+    }
+    if !own.has_linetype() {
+        own.linetype = parent.linetype.clone();
+        own.linetype_handle = parent.linetype_handle;
+    }
+    if own.line_weight == crate::types::LineWeight::ByLayer {
+        own.line_weight = parent.line_weight;
+    }
+    if (own.linetype_scale - 1.0).abs() < 1e-12 {
+        own.linetype_scale = parent.linetype_scale;
+    }
+    own
+}
+
 /// Whether a child record's common data holds anything that the polyline's own data does not give
 /// it (see [`child_common`]).
 pub(crate) fn child_has_data(child: &EntityCommon, parent: &EntityCommon) -> bool {

@@ -3062,11 +3062,9 @@ impl<'a> DwgObjectWriter<'a> {
                 None
             };
             self.next_handle = (i + 1 < vertex_handles.len()).then(|| vertex_handles[i + 1]);
-            // A vertex with no color of its own takes the mesh's.
-            let mut own = v.common.clone();
-            if own.color == crate::types::Color::ByLayer {
-                own.color = e.common.color;
-            }
+            // A vertex with nothing of its own takes the mesh's color, linetype, lineweight and
+            // linetype scale.
+            let own = crate::entities::polyline::mesh_vertex_common(&v.common, &e.common);
             self.write_vertex_common(
                 common::OBJ_VERTEX_MESH,
                 vh,

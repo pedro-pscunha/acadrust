@@ -387,3 +387,90 @@ fn a_default_dxf_still_down_saves_a_polyline_nothing_names() {
     let (kinds, _) = entity_records(&bytes);
     assert!(kinds.iter().any(|k| k == "LWPOLYLINE"), "{kinds:?}");
 }
+
+// ── a polygon mesh vertex with nothing of its own takes the mesh's properties ──────────────────
+
+/// A polygon mesh with a dashed linetype, a lineweight, a linetype scale and a color, whose
+/// vertices are the defaults of `PolygonMeshVertex`.
+fn styled_mesh() -> CadDocument {
+    use acadrust::entities::{PolygonMeshEntity as PolygonMesh, PolygonMeshVertex};
+    use acadrust::tables::LineType;
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let mut dashed = LineType::dashed();
+    dashed.handle = doc.allocate_handle();
+    let dashed_handle = dashed.handle;
+    doc.line_types.add(dashed).expect("add linetype");
+    let mut mesh = PolygonMesh::new();
+    mesh.m_vertex_count = 2;
+    mesh.n_vertex_count = 2;
+    mesh.common.layer = "0".to_string();
+    mesh.common.color = Color::Index(3);
+    mesh.common.linetype = "Dashed".to_string();
+    mesh.common.linetype_handle = Some(dashed_handle);
+    mesh.common.line_weight = acadrust::types::LineWeight::from_value(50);
+    mesh.common.linetype_scale = 2.5;
+    for (x, y) in [(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)] {
+        mesh.vertices
+            .push(PolygonMeshVertex::at(acadrust::types::Vector3::new(
+                x, y, 0.0,
+            )));
+    }
+    doc.add_entity(EntityType::PolygonMesh(mesh))
+        .expect("add mesh");
+    doc
+}
+
+/// (color, linetype, lineweight value, linetype scale) of each vertex of the mesh.
+fn vertex_properties(doc: &CadDocument) -> Vec<(Color, String, i16, f64)> {
+    doc.entities()
+        .find_map(|e| match e {
+            EntityType::PolygonMesh(m) => Some(m),
+            _ => None,
+        })
+        .expect("a polygon mesh")
+        .vertices
+        .iter()
+        .map(|v| {
+            (
+                v.common.color,
+                v.common.linetype.clone(),
+                v.common.line_weight.value(),
+                v.common.linetype_scale,
+            )
+        })
+        .collect()
+}
+
+fn mesh_wanted() -> Vec<(Color, String, i16, f64)> {
+    vec![(Color::Index(3), "Dashed".to_string(), 50, 2.5); 4]
+}
+
+#[test]
+fn a_dxf_vertex_with_nothing_of_its_own_takes_the_mesh_properties() {
+    let doc = styled_mesh();
+    for bridge in [false, true] {
+        let writer = DxfWriter::new(&doc);
+        let bytes = if bridge {
+            writer.for_dwg_bridge()
+        } else {
+            writer
+        }
+        .write_to_vec()
+        .expect("write dxf");
+        assert_eq!(
+            vertex_properties(&read(bytes)),
+            mesh_wanted(),
+            "bridge={bridge}"
+        );
+    }
+}
+
+#[test]
+fn a_dwg_vertex_with_nothing_of_its_own_takes_the_mesh_properties() {
+    let doc = styled_mesh();
+    let dwg = DwgWriter::write_to_vec(&doc).expect("write dwg");
+    let back = DwgReader::from_stream(Cursor::new(dwg))
+        .read()
+        .expect("read dwg");
+    assert_eq!(vertex_properties(&back), mesh_wanted());
+}
