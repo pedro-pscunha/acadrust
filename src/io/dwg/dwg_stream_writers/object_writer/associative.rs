@@ -373,8 +373,9 @@ impl<'a> DwgObjectWriter<'a> {
                 if reference.osnap_type == 6 || reference.osnap_type == 11 {
                     self.writer
                         .write_bit_long(reference.intersection_objects.len() as i32);
+                    // A soft pointer (DXF group 332), as AutoCAD stores it.
                     self.write_assoc_handles(
-                        DwgReferenceType::HardPointer,
+                        DwgReferenceType::SoftPointer,
                         &reference.intersection_objects,
                     );
                     self.writer
@@ -1052,5 +1053,83 @@ impl<'a> DwgObjectWriter<'a> {
             }
         }
         self.register_object(object.handle);
+    }
+}
+
+#[cfg(test)]
+mod dim_assoc_reference_tests {
+    use crate::document::CadDocument;
+    use crate::io::dwg::dwg_reference_type::DwgReferenceType;
+    use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+    use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
+    use crate::objects::{
+        AssocDimensionAssociation, AssocDimensionReference, AssociativeData, AssociativeObject,
+        ObjectType,
+    };
+    use crate::types::{DxfVersion, Handle};
+
+    /// The reference types of the handles that follow the common data of a DIMASSOC with one
+    /// referenced object and one intersection object: the dimension, the object, the intersection
+    /// object. The record is written natively (an unchanged DWG read would reuse the raw record).
+    fn stored_references(version: DxfVersion) -> Vec<DwgReferenceType> {
+        let mut document = CadDocument::with_version(version);
+        let handle = document.allocate_handle();
+        let owner = document.header.named_objects_dict_handle;
+        let reference = AssocDimensionReference {
+            class_name: "AcDbOsnapPointRef".to_string(),
+            osnap_type: 6,
+            xrefs: vec![Handle::new(0x6C35C)],
+            main_subent_type: 1,
+            main_gs_marker: 2,
+            intersection_objects: vec![Handle::new(0x6C35D)],
+            intersection_subent_type: 1,
+            intersection_gs_marker: 3,
+            ..Default::default()
+        };
+        let mut value = AssocDimensionAssociation {
+            associativity: 1,
+            dimension: Handle::new(0x6C000),
+            ..Default::default()
+        };
+        value.references[0] = vec![reference];
+        let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
+        object.handle = handle;
+        object.owner = owner;
+        object.data = AssociativeData::DimensionAssociation(value);
+        document
+            .objects
+            .insert(handle, ObjectType::Associative(object));
+        let (bytes, handles, _, _) = DwgObjectWriter::new(&document).unwrap().write();
+        let at = handles
+            .iter()
+            .find(|(h, _)| *h == handle.value())
+            .map(|(_, at)| i64::from(*at))
+            .expect("the object is written");
+        let reader = DwgObjectReader::new(
+            bytes,
+            version,
+            handles
+                .into_iter()
+                .map(|(h, at)| (h, i64::from(at)))
+                .collect(),
+        )
+        .unwrap();
+        let (type_code, mut merged) = reader.read_record_at(at as usize).unwrap();
+        reader.read_common_non_entity_data(&mut merged, type_code);
+        (0..3).map(|_| merged.read_typed_handle().1).collect()
+    }
+
+    /// AutoCAD stores the dimension, the referenced objects and the intersection objects of a
+    /// DIMASSOC as soft pointers (DXF groups 330, 331 and 332). With a hard pointer for the
+    /// intersection object it discards the object ("error 34, eWrongObjectType").
+    #[test]
+    fn the_references_of_a_dim_assoc_are_soft_pointers() {
+        for version in [DxfVersion::AC1018, DxfVersion::AC1032] {
+            assert_eq!(
+                stored_references(version),
+                vec![DwgReferenceType::SoftPointer; 3],
+                "{version:?}"
+            );
+        }
     }
 }
