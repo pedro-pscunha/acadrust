@@ -5770,6 +5770,29 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(170, viewport.shade_plot_mode)?;
         }
 
+        // R2007+: the viewport's render settings. The SUN object a viewport owns is reached
+        // only through 361.
+        if self.dxf_version >= DxfVersion::AC1021 {
+            for (code, handle) in [
+                (332, viewport.background_handle),
+                (333, viewport.shade_plot_handle),
+                (348, viewport.visual_style_handle),
+                (361, viewport.sun_handle),
+            ] {
+                if !handle.is_null() {
+                    self.writer.write_handle(code, handle)?;
+                }
+            }
+            self.writer.write_bool(292, viewport.default_lighting)?;
+            self.writer.write_i16(282, viewport.default_lighting_type)?;
+            self.writer.write_double(141, viewport.brightness)?;
+            self.writer.write_double(142, viewport.contrast)?;
+            self.writer.write_color(63, viewport.ambient_color)?;
+            if let Some(rgb) = viewport.ambient_color.to_true_color_value() {
+                self.writer.write_i32(421, rgb)?;
+            }
+        }
+
         Ok(())
     }
 

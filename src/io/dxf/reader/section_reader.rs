@@ -17671,6 +17671,27 @@ impl<'a> SectionReader<'a> {
                         vp.default_lighting_type = v;
                     }
                 }
+                332 | 333 | 348 | 361 => {
+                    if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
+                        let handle = Handle::new(h);
+                        match pair.code {
+                            332 => vp.background_handle = handle,
+                            333 => vp.shade_plot_handle = handle,
+                            348 => vp.visual_style_handle = handle,
+                            _ => vp.sun_handle = handle,
+                        }
+                    }
+                }
+                63 => {
+                    if let Some(v) = pair.as_i16() {
+                        vp.ambient_color = Color::from_index(v);
+                    }
+                }
+                421 => {
+                    if let Some(v) = pair.as_i32() {
+                        vp.ambient_color = Color::from_true_color_value(v);
+                    }
+                }
                 _ => {
                     self.try_read_common_entity_code(&pair, &mut vp.common)?;
                 }
