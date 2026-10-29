@@ -8917,6 +8917,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     281 => self
                         .writer
                         .write_byte(281, (!style.has_header_row()) as u8)?,
+                    // The border groups of a DWG bridge (see `write_table_cell_style`).
+                    94..=99 | 340..=345 if !self.dwg_bridge => {}
                     _ => self.writer.write_string(*code, value)?,
                 }
             }
@@ -8993,6 +8995,32 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_color_i16(64 + index as i32, border.color)?;
             if let Some(rgb) = border.color.to_true_color_value() {
                 self.writer.write_i32(422 + index as i32, rgb)?;
+            }
+        }
+        // The DXF Reference has no group for the linetype of a border or for its override
+        // flags (a DWG keeps both, and a custom linetype is one of the overrides), so only a DWG
+        // bridge writes them: 340 to 345 the linetype (a hard pointer, which a host that
+        // renumbers handles remaps) and 94 to 99 the flags, in the order of the borders.
+        if self.dwg_bridge {
+            for (index, border) in [
+                &style.top_border,
+                &style.horizontal_inside_border,
+                &style.bottom_border,
+                &style.left_border,
+                &style.vertical_inside_border,
+                &style.right_border,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if self.header_pointer_is_written(border.line_type) {
+                    self.writer
+                        .write_handle(340 + index as i32, border.line_type)?;
+                }
+                if !border.property_flags.is_empty() {
+                    self.writer
+                        .write_i32(94 + index as i32, border.property_flags.bits())?;
+                }
             }
         }
         if let Some(rgb) = style.text_color.to_true_color_value() {

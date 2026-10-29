@@ -2,10 +2,15 @@
 //! them at the ByBlock linetype. A DXF holds no linetype for a legacy row border, so a drawing
 //! that went DWG, DXF, DWG came back with null handles, and the row borders read from a DWG
 //! dropped them.
+//!
+//! The DXF Reference has no TABLESTYLE group for a border's linetype or its override flags, so the
+//! DWG bridge (`DxfWriter::for_dwg_bridge`) writes private groups for them (340 to 345, the
+//! linetype of each border, and 94 to 99, its override flags) and a normal DXF does not.
 
 use std::io::Cursor;
 
-use acadrust::objects::{ObjectType, TableStyle};
+use acadrust::objects::{ObjectType, TableBorderPropertyFlags, TableStyle};
+use acadrust::tables::LineType;
 use acadrust::types::{DxfVersion, Handle};
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfWriter};
 
@@ -38,6 +43,17 @@ fn through_dwg(doc: &CadDocument) -> CadDocument {
 
 fn through_dxf(doc: &CadDocument) -> CadDocument {
     let dxf = DxfWriter::new(doc).write_to_vec().expect("write dxf");
+    DxfReader::from_reader(Cursor::new(dxf))
+        .expect("reader")
+        .read()
+        .expect("read dxf")
+}
+
+fn through_bridge(doc: &CadDocument) -> CadDocument {
+    let dxf = DxfWriter::new(doc)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
     DxfReader::from_reader(Cursor::new(dxf))
         .expect("reader")
         .read()
@@ -82,19 +98,166 @@ fn the_borders_of_a_dwg_style_keep_their_linetype_in_the_row_styles() {
     assert_eq!(s.data_row_style.right_border.line_type, by_block);
 }
 
-#[test]
-fn a_row_border_linetype_survives_dwg_dxf_dwg() {
-    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
-    let continuous = linetype(&doc, "Continuous");
-    style_mut(&mut doc).title_row_style.top_border.line_type = continuous;
-    let read = through_dwg(&doc);
-    let overrides = override_linetypes(&read);
-    let title = overrides
+/// The name of the linetype `handle` is in `doc`.
+fn linetype_name(doc: &CadDocument, handle: Handle) -> String {
+    doc.line_types
         .iter()
-        .find(|(k, _)| *k == 1)
+        .find(|line_type| line_type.handle == handle)
+        .map_or_else(|| format!("no linetype {handle:?}"), |l| l.name.clone())
+}
+
+/// The linetype (by name) and override flags of the top border of the title row override.
+fn title_top(doc: &CadDocument) -> (String, TableBorderPropertyFlags) {
+    let (_, title) = style(doc)
+        .modern_overrides
+        .iter()
+        .find(|(key, _)| *key == 1)
         .expect("title override");
-    assert_eq!(title.1[0], continuous, "top border of the title row, DWG");
-    // A DXF names no linetype of a legacy row border: the DWG writer falls back to ByBlock.
+    let grid = &title.cell_style.borders[0];
+    (
+        linetype_name(doc, grid.line_type),
+        grid.border.property_flags,
+    )
+}
+
+/// A drawing whose title row has a dashed top border with the linetype override.
+fn with_dashed_border() -> CadDocument {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let mut dashed = LineType::dashed();
+    dashed.handle = doc.allocate_handle();
+    let handle = dashed.handle;
+    doc.line_types.add(dashed).expect("add linetype");
+    let border = &mut style_mut(&mut doc).title_row_style.top_border;
+    border.line_type = handle;
+    border.property_flags = TableBorderPropertyFlags::LINE_TYPE;
+    doc
+}
+
+#[test]
+fn a_dwg_keeps_a_dashed_border() {
+    let read = through_dwg(&with_dashed_border());
+    assert_eq!(
+        title_top(&read),
+        ("Dashed".to_string(), TableBorderPropertyFlags::LINE_TYPE)
+    );
+}
+
+#[test]
+fn a_border_linetype_and_its_override_survive_the_bridge() {
+    let read = through_dwg(&with_dashed_border());
+    let again = through_dwg(&through_bridge(&read));
+    assert_eq!(
+        title_top(&again),
+        ("Dashed".to_string(), TableBorderPropertyFlags::LINE_TYPE)
+    );
+    // The other borders stay by block, with no override.
+    let by_block = linetype(&again, "ByBlock");
+    let (_, title) = style(&again)
+        .modern_overrides
+        .iter()
+        .find(|(key, _)| *key == 1)
+        .expect("title override");
+    for grid in &title.cell_style.borders[1..] {
+        assert_eq!(grid.line_type, by_block);
+    }
+}
+
+#[test]
+fn a_border_linetype_follows_a_renumbered_linetype() {
+    let read = through_dwg(&with_dashed_border());
+    let dashed = linetype(&read, "Dashed");
+    let dxf = String::from_utf8(
+        DxfWriter::new(&read)
+            .for_dwg_bridge()
+            .write_to_vec()
+            .expect("write dxf"),
+    )
+    .expect("utf8");
+    // A host that renumbers handles changes the LTYPE record and every pointer to it.
+    let moved = format!("{:X}", dashed.value() + 0x6000);
+    let from = format!("{:X}", dashed.value());
+    let lines: Vec<&str> = dxf.lines().collect();
+    let mut out = Vec::new();
+    for pair in lines.chunks(2) {
+        let code: i32 = pair[0].trim().parse().unwrap_or(0);
+        let pointer = matches!(code, 5 | 330 | 340..=369 | 390);
+        out.push(pair[0].to_string());
+        if let Some(value) = pair.get(1) {
+            out.push(if pointer && value.trim() == from {
+                moved.clone()
+            } else {
+                value.to_string()
+            });
+        }
+    }
+    let back = DxfReader::from_reader(Cursor::new(out.join("\r\n").into_bytes()))
+        .expect("reader")
+        .read()
+        .expect("read dxf");
+    assert_eq!(
+        linetype(&back, "Dashed").value(),
+        dashed.value() + 0x6000,
+        "the host moved the linetype"
+    );
+    assert_eq!(title_top(&through_dwg(&back)).0, "Dashed");
+}
+
+/// The group codes of every TABLESTYLE object of a DXF.
+fn table_style_codes(bytes: Vec<u8>) -> Vec<Vec<i32>> {
+    let text = String::from_utf8(bytes).expect("utf8");
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let mut records: Vec<Vec<i32>> = Vec::new();
+    let mut in_style = false;
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { break };
+        let code: i32 = code.parse().expect("group code");
+        if code == 0 {
+            in_style = *value == "TABLESTYLE";
+            if in_style {
+                records.push(Vec::new());
+            }
+        } else if in_style {
+            records.last_mut().expect("record").push(code);
+        }
+    }
+    records
+}
+
+#[test]
+fn the_default_dxf_has_no_private_table_style_groups() {
+    let read = through_dwg(&with_dashed_border());
+    let default = table_style_codes(DxfWriter::new(&read).write_to_vec().expect("write dxf"));
+    assert!(!default.is_empty(), "no TABLESTYLE");
+    for record in &default {
+        assert!(
+            record.iter().all(|c| !matches!(*c, 94..=99 | 340..=345)),
+            "{record:?}"
+        );
+    }
+    let bridge = table_style_codes(
+        DxfWriter::new(&read)
+            .for_dwg_bridge()
+            .write_to_vec()
+            .expect("write dxf"),
+    );
+    assert!(bridge.iter().any(|r| r.contains(&340) && r.contains(&94)));
+    // A default DXF read again and written again stays free of them too.
+    let again = table_style_codes(
+        DxfWriter::new(&through_bridge(&read))
+            .write_to_vec()
+            .expect("write dxf"),
+    );
+    for record in &again {
+        assert!(
+            record.iter().all(|c| !matches!(*c, 94..=99 | 340..=345)),
+            "replayed: {record:?}"
+        );
+    }
+}
+
+#[test]
+fn a_default_dxf_still_gives_by_block_borders() {
+    let read = through_dwg(&with_dashed_border());
     let again = through_dwg(&through_dxf(&read));
     let by_block = linetype(&again, "ByBlock");
     for (key, handles) in override_linetypes(&again) {

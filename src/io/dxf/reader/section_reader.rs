@@ -22021,6 +22021,21 @@ impl<'a> SectionReader<'a> {
                             Color::from_true_color_value(v);
                     }
                 }
+                // The linetype and override flags of a border, as a DWG bridge writes them.
+                340..=345 => {
+                    if let (Some(row), Some(h)) = (
+                        rows.last_mut(),
+                        u64::from_str_radix(pair.value_string.trim(), 16).ok(),
+                    ) {
+                        border_mut(row, (pair.code - 340) as usize).line_type = Handle::new(h);
+                    }
+                }
+                94..=99 => {
+                    if let (Some(row), Some(v)) = (rows.last_mut(), pair.as_i32()) {
+                        border_mut(row, (pair.code - 94) as usize).property_flags =
+                            crate::objects::TableBorderPropertyFlags::from_bits_retain(v);
+                    }
+                }
                 1001 => {
                     if pair.value_string == "AcadAnnotative" {
                         ts.annotative = self.read_annotative_xdata(pair)?;
