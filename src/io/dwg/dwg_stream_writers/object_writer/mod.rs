@@ -948,11 +948,14 @@ impl<'a> DwgObjectWriter<'a> {
         );
 
         if self.version.r2000_plus() {
-            // Plotstyle handle
-            self.writer.write_handle(
-                DwgReferenceType::HardPointer,
-                layer.plotstyle_handle.value(),
-            );
+            // Plotstyle handle; a pointer to an object the document lacks is written null.
+            let plotstyle = if self.document.objects.contains_key(&layer.plotstyle_handle) {
+                layer.plotstyle_handle
+            } else {
+                Handle::NULL
+            };
+            self.writer
+                .write_handle(DwgReferenceType::HardPointer, plotstyle.value());
         }
 
         if self.version.r2007_plus() {

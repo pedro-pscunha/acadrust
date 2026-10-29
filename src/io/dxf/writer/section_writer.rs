@@ -1695,6 +1695,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_handle(390, plotstyle_handle)?;
             }
         }
+        // R2007+ layer records hold a hard pointer to a material too.
+        if self.dxf_version >= DxfVersion::AC1021 && self.header_pointer_is_written(layer.material)
+        {
+            self.writer.write_handle(347, layer.material)?;
+        }
 
         // Plot flag (code 290 is Bool type - single byte in binary)
         self.writer.write_bool(290, layer.is_plottable)?;

@@ -10000,6 +10000,16 @@ impl<'a> SectionReader<'a> {
                         layer.line_weight = LineWeight::from_value(lw);
                     }
                 }
+                // The plot style and the material the layer points at.
+                347 | 390 => {
+                    if let Some(handle) = pair.as_handle() {
+                        if pair.code == 347 {
+                            layer.material = Handle::new(handle);
+                        } else {
+                            layer.plotstyle_handle = Handle::new(handle);
+                        }
+                    }
+                }
                 1001 => {
                     self.reader.push_back(pair);
                     let (xdata, next_pair) = self.read_extended_data()?;
