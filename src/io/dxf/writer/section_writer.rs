@@ -9014,8 +9014,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 .any(|(code, _)| *code == 280);
             let has_header_suppressed = raw_dxf_codes.iter().any(|(code, _)| *code == 281);
             let mut saw_name = false;
+            let mut in_xdata = false;
             for (code, value) in raw_dxf_codes {
                 match *code {
+                    1001 => {
+                        in_xdata = true;
+                        self.writer.write_string(*code, value)?;
+                    }
                     3 => {
                         self.writer.write_string(*code, value)?;
                         if !saw_name {
@@ -9043,6 +9048,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                         .write_byte(281, (!style.has_header_row()) as u8)?,
                     // The border groups of a DWG bridge (see `write_table_cell_style`).
                     94..=99 | 340..=345 if !self.dwg_bridge => {}
+                    // The true colors of a DWG bridge (420 to 427). They are not XDATA values.
+                    420..=427 if !self.dwg_bridge && !in_xdata => {}
                     _ => self.writer.write_string(*code, value)?,
                 }
             }
@@ -9095,8 +9102,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_string(7, &style.text_style_name)?;
         self.writer.write_double(140, style.text_height)?;
         self.writer.write_i16(170, style.alignment as i16)?;
-        self.write_color_i16(62, style.text_color)?;
-        self.write_color_i16(63, style.fill_color)?;
+        self.write_table_style_color(62, style.text_color)?;
+        self.write_table_style_color(63, style.fill_color)?;
         self.writer.write_byte(283, style.fill_enabled as u8)?;
         self.writer.write_i32(90, style.data_type)?;
         self.writer.write_i32(91, style.unit_type)?;
@@ -9116,9 +9123,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 .write_i16(274 + index as i32, border.line_weight.as_i16())?;
             self.writer
                 .write_byte(284 + index as i32, (!border.is_invisible) as u8)?;
-            self.write_color_i16(64 + index as i32, border.color)?;
-            if let Some(rgb) = border.color.to_true_color_value() {
-                self.writer.write_i32(422 + index as i32, rgb)?;
+            self.write_table_style_color(64 + index as i32, border.color)?;
+            // The true color of a border (422 to 427) is private to a DWG bridge: the DXF
+            // Reference has the ACI groups only.
+            if self.dwg_bridge {
+                if let Some(rgb) = border.color.to_true_color_value() {
+                    self.writer.write_i32(422 + index as i32, rgb)?;
+                }
             }
         }
         // The DXF Reference has no group for the linetype of a border or for its override
@@ -9147,13 +9158,24 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 }
             }
         }
-        if let Some(rgb) = style.text_color.to_true_color_value() {
-            self.writer.write_i32(420, rgb)?;
-        }
-        if let Some(rgb) = style.fill_color.to_true_color_value() {
-            self.writer.write_i32(421, rgb)?;
+        if self.dwg_bridge {
+            if let Some(rgb) = style.text_color.to_true_color_value() {
+                self.writer.write_i32(420, rgb)?;
+            }
+            if let Some(rgb) = style.fill_color.to_true_color_value() {
+                self.writer.write_i32(421, rgb)?;
+            }
         }
         Ok(())
+    }
+
+    /// A color of a TABLESTYLE record as an ACI group: a true color is its nearest index (the
+    /// true color follows in a private group of a DWG bridge).
+    fn write_table_style_color(&mut self, code: i32, color: Color) -> Result<()> {
+        match color {
+            Color::Rgb { .. } => self.writer.write_i16(code, color.approximate_index()),
+            _ => self.write_color_i16(code, color),
+        }
     }
 
     /// The reactors and extension dictionary of an object whose record has no field for them (a

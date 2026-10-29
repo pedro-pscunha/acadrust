@@ -11,7 +11,7 @@ use std::io::Cursor;
 
 use acadrust::objects::{ObjectType, TableBorderPropertyFlags, TableStyle};
 use acadrust::tables::LineType;
-use acadrust::types::{DxfVersion, Handle};
+use acadrust::types::{Color, DxfVersion, Handle};
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfWriter};
 
 fn style_mut(doc: &mut CadDocument) -> &mut TableStyle {
@@ -262,5 +262,93 @@ fn a_default_dxf_still_gives_by_block_borders() {
     let by_block = linetype(&again, "ByBlock");
     for (key, handles) in override_linetypes(&again) {
         assert_eq!(handles, vec![by_block; 6], "override {key}");
+    }
+}
+
+// ── true colors ────────────────────────────────────────────────────────────
+
+const TEXT: Color = Color::Rgb {
+    r: 187,
+    g: 130,
+    b: 157,
+};
+const FILL: Color = Color::Rgb {
+    r: 12,
+    g: 99,
+    b: 255,
+};
+const BORDER: Color = Color::Rgb {
+    r: 250,
+    g: 200,
+    b: 10,
+};
+
+/// A drawing whose title row has a true text color, fill color and top border color.
+fn with_true_colors() -> CadDocument {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let row = &mut style_mut(&mut doc).title_row_style;
+    row.text_color = TEXT;
+    row.fill_color = FILL;
+    row.top_border.color = BORDER;
+    doc
+}
+
+fn title_colors(doc: &CadDocument) -> (Color, Color, Color) {
+    let row = &style(doc).title_row_style;
+    (row.text_color, row.fill_color, row.top_border.color)
+}
+
+fn private_color_groups(bytes: Vec<u8>) -> Vec<Vec<i32>> {
+    table_style_codes(bytes)
+        .into_iter()
+        .map(|record| {
+            record
+                .into_iter()
+                .filter(|code| (420..=427).contains(code))
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn the_default_dxf_has_no_true_color_groups_in_a_table_style() {
+    let doc = with_true_colors();
+    let records = private_color_groups(DxfWriter::new(&doc).write_to_vec().expect("write dxf"));
+    assert!(!records.is_empty(), "no TABLESTYLE");
+    for record in records {
+        assert!(record.is_empty(), "{record:?}");
+    }
+    // The ACI colors stay, as the nearest index of each.
+    let back = through_dxf(&doc);
+    assert_eq!(
+        title_colors(&back),
+        (
+            Color::from_index(TEXT.approximate_index()),
+            Color::from_index(FILL.approximate_index()),
+            Color::from_index(BORDER.approximate_index())
+        )
+    );
+}
+
+#[test]
+fn the_bridge_dxf_keeps_the_true_colors_of_a_table_style() {
+    let doc = with_true_colors();
+    let bytes = DxfWriter::new(&doc)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
+    assert!(private_color_groups(bytes).iter().any(|r| r.len() == 3));
+    assert_eq!(title_colors(&through_bridge(&doc)), (TEXT, FILL, BORDER));
+}
+
+#[test]
+fn a_style_read_from_a_bridge_has_no_true_color_groups_in_a_default_dxf() {
+    // The bridge style is written again from its raw groups.
+    let read = through_bridge(&with_true_colors());
+    assert_eq!(title_colors(&read), (TEXT, FILL, BORDER));
+    let records = private_color_groups(DxfWriter::new(&read).write_to_vec().expect("write dxf"));
+    assert!(!records.is_empty(), "no TABLESTYLE");
+    for record in records {
+        assert!(record.is_empty(), "{record:?}");
     }
 }
