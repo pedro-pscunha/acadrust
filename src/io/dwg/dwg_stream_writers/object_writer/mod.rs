@@ -169,9 +169,10 @@ struct ParallelEntityBatch {
     class_counts_complete: bool,
 }
 
-/// A proxy names its class by the class number of the DWG. When it also names the class by its
-/// DXF name, both must be the same class: AutoCAD binds the proxy to the number, so a number that
-/// names another class makes it read the payload as that class (and can crash).
+/// A proxy names its class by the class number of the DWG. When it also names the class by a
+/// text (the DXF name, or `cn:` and the C++ name, as the files of AutoCAD verticals do), both
+/// must be the same class: AutoCAD binds the proxy to the number, so a number that names another
+/// class makes it read the payload as that class (and can crash).
 fn check_proxy_class(
     document: &CadDocument,
     class_id: i32,
@@ -183,14 +184,17 @@ fn check_proxy_class(
     let named = document
         .classes
         .iter()
-        .find(|class| i32::from(class.class_number) == class_id)
-        .map(|class| class.dxf_name.as_str());
-    if named.is_some_and(|name| name.eq_ignore_ascii_case(dxf_subclass)) {
+        .find(|class| i32::from(class.class_number) == class_id);
+    let subclass = dxf_subclass.strip_prefix("cn:").unwrap_or(dxf_subclass);
+    if named.is_some_and(|class| {
+        class.dxf_name.eq_ignore_ascii_case(subclass)
+            || class.cpp_class_name.eq_ignore_ascii_case(subclass)
+    }) {
         Ok(())
     } else {
         Err(crate::error::DxfError::Parse(format!(
             "proxy of class {dxf_subclass} has class number {class_id}, which names {}",
-            named.unwrap_or("no class")
+            named.map_or("no class", |class| class.dxf_name.as_str())
         )))
     }
 }

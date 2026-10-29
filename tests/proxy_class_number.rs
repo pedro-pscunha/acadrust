@@ -125,6 +125,21 @@ fn a_proxy_whose_number_names_another_class_is_not_written() {
     assert!(DwgWriter::write_to_vec(&document).is_err());
 }
 
+/// Files of AutoCAD verticals name the class of a proxy by `cn:` and its C++ name.
+#[test]
+fn a_proxy_may_name_its_class_by_the_cpp_name() {
+    let mut document = DxfReader::from_reader(Cursor::new(dxf(502)))
+        .expect("reader")
+        .read()
+        .expect("read dxf");
+    let handle = proxy(&document).handle;
+    let Some(ObjectType::ProxyObject(object)) = document.objects.get_mut(&handle) else {
+        panic!("the proxy object");
+    };
+    object.dxf_subclass = "cn:AcDbAssocPersSubentManager".to_string();
+    DwgWriter::write_to_vec(&document).expect("the class is the one the proxy names");
+}
+
 #[test]
 fn a_proxy_naming_no_class_of_the_file_fails_the_read() {
     let result = DxfReader::from_reader(Cursor::new(dxf(503)))
