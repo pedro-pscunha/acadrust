@@ -52,6 +52,105 @@ fn split_proxy_text_data(binary: &[u8], text_data_bits: u32) -> (&[u8], &[u8]) {
     binary.split_at(binary.len() - text_len)
 }
 
+/// An object that exists only as DWG bytes, as `DxfWriter::for_dwg_bridge` writes it: the groups
+/// after the subclass marker `AcDbAcadrustRawDwgObject` and the reactors and extension
+/// dictionary groups before it.
+struct RawDwgObject {
+    /// The class's C++ name, when the record has one.
+    cpp_class_name: Option<String>,
+    reactors: Vec<Handle>,
+    xdictionary: Option<Handle>,
+    handle_bits: i64,
+    version: Option<crate::types::DxfVersion>,
+    data: Vec<u8>,
+    /// The handles after the class data, as the host left them (it may have renumbered them).
+    references: Vec<crate::objects::ProxyObjectReference>,
+}
+
+impl RawDwgObject {
+    /// The raw record in an object's groups, or `None` when it has no marker or its byte or
+    /// reference count does not match (a damaged record is read as an ordinary unknown object).
+    fn from_codes(codes: &[(i32, String)]) -> Option<Self> {
+        use crate::objects::{ProxyObjectReference, ProxyReferenceKind};
+        let marker = codes.iter().position(|(code, value)| {
+            *code == 100 && value == super::super::writer::RAW_DWG_OBJECT_SUBCLASS
+        })?;
+        let (head, body) = codes.split_at(marker);
+        let mut reactors = Vec::new();
+        let mut xdictionary = None;
+        let mut group = "";
+        for (code, value) in head {
+            let handle = || u64::from_str_radix(value.trim(), 16).ok().map(Handle::new);
+            match *code {
+                102 => group = value.trim().strip_prefix('{').unwrap_or(""),
+                330 if group == "ACAD_REACTORS" => reactors.extend(handle()),
+                360 if group == "ACAD_XDICTIONARY" => xdictionary = handle(),
+                _ => {}
+            }
+        }
+        let mut raw = Self {
+            cpp_class_name: None,
+            reactors,
+            xdictionary,
+            handle_bits: 0,
+            version: None,
+            data: Vec::new(),
+            references: Vec::new(),
+        };
+        let (mut length, mut count) = (None, None);
+        for (code, value) in body {
+            let kind = match *code {
+                330 => Some(ProxyReferenceKind::SoftPointer),
+                340 => Some(ProxyReferenceKind::HardPointer),
+                350 => Some(ProxyReferenceKind::SoftOwnership),
+                360 => Some(ProxyReferenceKind::HardOwnership),
+                390 => Some(ProxyReferenceKind::Undefined),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                // A reference a host found dangling is the null handle.
+                let handle = u64::from_str_radix(value.trim(), 16).unwrap_or(0);
+                raw.references.push(ProxyObjectReference {
+                    handle: Handle::new(handle),
+                    kind,
+                });
+                continue;
+            }
+            match *code {
+                1 => raw.cpp_class_name = Some(value.clone()),
+                90 => raw.handle_bits = value.trim().parse().unwrap_or(0),
+                3 => {
+                    raw.version = Some(crate::types::DxfVersion::from_version_string(value.trim()))
+                        .filter(|version| *version != crate::types::DxfVersion::Unknown)
+                }
+                91 => length = value.trim().parse::<usize>().ok(),
+                92 => count = value.trim().parse::<usize>().ok(),
+                310 => append_hex_bytes(&mut raw.data, value),
+                _ => {}
+            }
+        }
+        (length == Some(raw.data.len()) && count == Some(raw.references.len())).then_some(raw)
+    }
+
+    /// The object as an Arch object, the form the DWG writer writes again from its DWG bytes
+    /// (it re-encodes the common data and the references, so a class number or a handle a
+    /// host changed does not matter). A class that is not an AutoCAD Architecture class gets
+    /// the same form.
+    fn into_object(self, type_name: String, handle: Handle, owner: Handle) -> ObjectType {
+        let mut arch = crate::classes::arch::ArchObject::new(type_name, handle, owner);
+        if let Some(cpp_class_name) = self.cpp_class_name {
+            arch.cpp_class_name = cpp_class_name;
+        }
+        arch.reactors = self.reactors;
+        arch.xdictionary_handle = self.xdictionary;
+        arch.raw_dwg_data = Some(self.data);
+        arch.raw_dwg_handle_bits = self.handle_bits;
+        arch.raw_dwg_version = self.version;
+        arch.raw_dwg_references = Some(self.references);
+        ObjectType::Arch(arch)
+    }
+}
+
 fn append_hex_bytes(target: &mut Vec<u8>, value: &str) {
     let bytes = value.trim().as_bytes();
     let mut index = 0;
@@ -7224,6 +7323,12 @@ impl<'a> SectionReader<'a> {
                                 );
                             }
                             let (handle, owner, raw_codes) = self.read_unknown_object_full()?;
+                            // A raw DWG record a DWG bridge wrote (`DxfWriter::for_dwg_bridge`).
+                            if let Some(raw) = RawDwgObject::from_codes(&raw_codes) {
+                                let object = raw.into_object(type_name, handle, owner);
+                                document.objects.insert(handle, object);
+                                return Ok(());
+                            }
                             let raw_dxf_codes = if raw_codes.is_empty() {
                                 None
                             } else {
@@ -9666,6 +9771,8 @@ impl<'a> SectionReader<'a> {
     fn read_unknown_object_full(&mut self) -> Result<(Handle, Handle, Vec<(i32, String)>)> {
         let mut handle = Handle::NULL;
         let mut owner = Handle::NULL;
+        let mut owner_seen = false;
+        let mut in_group = false;
         let mut raw_codes: Vec<(i32, String)> = Vec::new();
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -9678,18 +9785,18 @@ impl<'a> SectionReader<'a> {
                         handle = Handle::new(h);
                     }
                 }
-                330 => {
-                    // First 330 outside a 102-group is the owner.
-                    // Subsequent 330s inside reactor groups are stored as raw codes.
-                    if owner == Handle::NULL {
-                        if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
-                            owner = Handle::new(h);
-                        }
-                    } else {
-                        raw_codes.push((pair.code, pair.value_string.clone()));
+                330 if !owner_seen && !in_group => {
+                    // First 330 outside a 102-group is the owner. The 330s inside reactor
+                    // groups, which come first in a DXF, are stored as raw codes.
+                    owner_seen = true;
+                    if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
+                        owner = Handle::new(h);
                     }
                 }
                 _ => {
+                    if pair.code == 102 {
+                        in_group = pair.value_string.trim().starts_with('{');
+                    }
                     raw_codes.push((pair.code, pair.value_string.clone()));
                 }
             }

@@ -30,8 +30,22 @@ impl DwgObjectWriter<'_> {
                 object.dxf_name
             ))
         })?;
+        let mut body = Self::raw_record_body(raw, object.raw_dwg_handle_bits, version)?;
+        if let Some(references) = &object.raw_dwg_references {
+            if references.len() == body.references.len() {
+                body.references = references.clone();
+            }
+        }
+        Ok(body)
+    }
+
+    fn raw_record_body(
+        raw: &[u8],
+        handle_bits: i64,
+        version: DxfVersion,
+    ) -> crate::error::Result<ArchitectureObjectBody> {
         let objects = DwgObjectReader::new(Vec::new(), version, Default::default())?;
-        let (type_code, mut reader) = objects.read_raw_record(raw, object.raw_dwg_handle_bits)?;
+        let (type_code, mut reader) = objects.read_raw_record(raw, handle_bits)?;
         let common = objects.read_common_non_entity_data(&mut reader, type_code);
         reader.check_error()?;
         let (payload, text, references) = read_proxy_payload(&mut reader, common.common.handle);
@@ -44,6 +58,18 @@ impl DwgObjectWriter<'_> {
             text,
             references,
         })
+    }
+
+    /// The handles after the class data of a raw DWG object record, or `None` when the record
+    /// does not parse as an object body of `version`.
+    pub(crate) fn raw_record_references(
+        raw: &[u8],
+        handle_bits: i64,
+        version: DxfVersion,
+    ) -> Option<Vec<ProxyObjectReference>> {
+        Self::raw_record_body(raw, handle_bits, version)
+            .ok()
+            .map(|body| body.references)
     }
 
     pub(crate) fn validate_architecture_object(

@@ -7,6 +7,7 @@ mod stream_writer;
 mod text_writer;
 
 pub use binary_writer::DxfBinaryWriter;
+pub(crate) use section_writer::RAW_DWG_OBJECT_SUBCLASS;
 pub use section_writer::SectionWriter;
 pub use stream_writer::{value_type_for_code, DxfStreamWriter, DxfStreamWriterExt};
 pub use text_writer::DxfTextWriter;
@@ -53,7 +54,7 @@ pub struct DxfOmission {
 /// and are not listed. Objects and entities with a stored DXF class body are
 /// written as that class. R12 has no proxy entity, so an R12 save still fails
 /// while any Arch record remains.
-pub(crate) fn architecture_omissions(document: &CadDocument) -> Vec<DxfOmission> {
+pub(crate) fn architecture_omissions(document: &CadDocument, dwg_bridge: bool) -> Vec<DxfOmission> {
     let mut omitted = Vec::new();
     for entity in document.entities() {
         if !dxf_skips_arch_entity(entity) {
@@ -75,7 +76,8 @@ pub(crate) fn architecture_omissions(document: &CadDocument) -> Vec<DxfOmission>
         let ObjectType::Arch(object) = object else {
             continue;
         };
-        if object.raw_dxf_codes.is_some() {
+        // A DWG bridge carries an object that has DWG bytes as a private record.
+        if object.raw_dxf_codes.is_some() || (dwg_bridge && object.raw_dwg_data.is_some()) {
             continue;
         }
         omitted.push(DxfOmission {
@@ -119,6 +121,8 @@ pub struct DxfWriter<'a> {
     version: Option<crate::types::DxfVersion>,
     /// Keep a plain 2D polyline as POLYLINE instead of down-saving it to LWPOLYLINE.
     keep_heavy_polylines: bool,
+    /// Write the private records of a DWG to DXF to DWG bridge.
+    dwg_bridge: bool,
 }
 
 impl<'a> DxfWriter<'a> {
@@ -129,6 +133,7 @@ impl<'a> DxfWriter<'a> {
             binary: false,
             version: None,
             keep_heavy_polylines: false,
+            dwg_bridge: false,
         }
     }
 
@@ -139,6 +144,7 @@ impl<'a> DxfWriter<'a> {
             binary: true,
             version: None,
             keep_heavy_polylines: false,
+            dwg_bridge: false,
         }
     }
 
@@ -161,6 +167,15 @@ impl<'a> DxfWriter<'a> {
         self
     }
 
+    /// Write the private records of a DWG to DXF to DWG bridge, for a DXF that only a host and
+    /// [`DxfReader`](crate::DxfReader) read, never AutoCAD: objects that exist only as DWG bytes
+    /// (such as the AutoCAD Architecture display configuration) and the dynamic block purge
+    /// preventer, which a normal DXF leaves out.
+    pub fn for_dwg_bridge(mut self) -> Self {
+        self.dwg_bridge = true;
+        self
+    }
+
     /// Set whether to write binary format
     pub fn set_binary(&mut self, binary: bool) {
         self.binary = binary;
@@ -172,7 +187,7 @@ impl<'a> DxfWriter<'a> {
         if self.version == Some(crate::types::DxfVersion::AC1009) {
             return Vec::new();
         }
-        architecture_omissions(self.document)
+        architecture_omissions(self.document, self.dwg_bridge)
     }
 
     /// Write to a file
@@ -315,6 +330,7 @@ impl<'a> DxfWriter<'a> {
         let mut section_writer = SectionWriter::new(writer, handle_start, handle_seed);
         section_writer.set_version(output_version);
         section_writer.set_keep_heavy_polylines(self.keep_heavy_polylines);
+        section_writer.set_dwg_bridge(self.dwg_bridge);
         section_writer.build_valid_handles(document);
 
         // Write all sections

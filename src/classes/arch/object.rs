@@ -19,6 +19,11 @@ pub struct ArchObject {
     pub raw_dwg_data: Option<Vec<u8>>,
     pub raw_dwg_handle_bits: i64,
     pub raw_dwg_version: Option<DxfVersion>,
+    /// The handles the DWG body refers to after its class data, when a host that renumbers
+    /// handles has remapped them (a DXF bridge carries them as pointer groups). The DWG writer
+    /// writes these instead of the ones in `raw_dwg_data`, which must be as many.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub raw_dwg_references: Option<Vec<crate::objects::ProxyObjectReference>>,
 }
 
 impl ArchObject {
@@ -38,6 +43,7 @@ impl ArchObject {
             raw_dwg_data: None,
             raw_dwg_handle_bits: 0,
             raw_dwg_version: None,
+            raw_dwg_references: None,
         }
     }
 }

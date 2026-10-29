@@ -16,10 +16,11 @@ use crate::objects::{
     DynamicBlockData, DynamicBlockObject, GeoData, Group, ImageDefinition, ImageDefinitionReactor,
     Layout, MLineStyle, Material, MaterialColor, MaterialMap, MaterialProceduralValue,
     MaterialTexture, MultiLeaderStyle, ObjectContextData, ObjectContextKind, ObjectType,
-    PlotSettings, RasterVariables, Scale, SortEntitiesTable, SpatialFilter, TableStyle,
-    VisualStyle, VisualStyleProperty, VisualStylePropertyValue, WipeoutVariables, XRecord,
-    XRecordEntry,
+    PlotSettings, ProxyObjectReference, ProxyReferenceKind, RasterVariables, Scale,
+    SortEntitiesTable, SpatialFilter, TableStyle, VisualStyle, VisualStyleProperty,
+    VisualStylePropertyValue, WipeoutVariables, XRecord, XRecordEntry,
 };
+use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
 use crate::tables::*;
 use crate::types::{Color, DxfVersion, Handle, LineWeight, Vector3};
 use crate::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
@@ -66,6 +67,22 @@ fn is_unrestorable_assoc_object(type_name: &str) -> bool {
     normalized.starts_with("ACDBDYNAMICBLOCKPURGEPREVENTER")
 }
 
+/// Subclass marker of the private raw DWG object record of a DWG bridge.
+pub(crate) const RAW_DWG_OBJECT_SUBCLASS: &str = "AcDbAcadrustRawDwgObject";
+
+/// What [`SectionWriter::write_raw_dwg_object`] writes besides the bytes.
+struct RawDwgRecord<'a> {
+    type_name: &'a str,
+    handle: Handle,
+    owner: Handle,
+    reactors: Vec<Handle>,
+    xdictionary: Option<Handle>,
+    cpp_class_name: Option<&'a str>,
+    version: Option<DxfVersion>,
+    handle_bits: i64,
+    references: Vec<ProxyObjectReference>,
+}
+
 /// Writes all DXF sections
 pub struct SectionWriter<'a, W: DxfStreamWriter> {
     writer: &'a mut W,
@@ -109,6 +126,8 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     source_dwg_context: Option<(DxfVersion, u8)>,
     /// Write a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of an LWPOLYLINE.
     keep_heavy_polylines: bool,
+    /// Write the private records of a DWG to DXF to DWG bridge (see `DxfWriter::for_dwg_bridge`).
+    dwg_bridge: bool,
 }
 
 impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
@@ -134,12 +153,49 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             loft_reference_appid: None,
             source_dwg_context: None,
             keep_heavy_polylines: false,
+            dwg_bridge: false,
         }
+    }
+
+    /// Write the private records of a DWG to DXF to DWG bridge: objects that exist only as DWG
+    /// bytes and the dynamic block purge preventer. Call this before [`Self::build_valid_handles`].
+    pub fn set_dwg_bridge(&mut self, bridge: bool) {
+        self.dwg_bridge = bridge;
     }
 
     /// Keep a plain 2D polyline as POLYLINE/VERTEX/SEQEND instead of down-saving it to LWPOLYLINE.
     pub fn set_keep_heavy_polylines(&mut self, keep: bool) {
         self.keep_heavy_polylines = keep;
+    }
+
+    /// Whether the bridge writes `object` as a raw DWG record: it has DWG bytes and no DXF form,
+    /// and the bytes parse as an object record (one the DWG writer could not write again is left
+    /// out, as it was before).
+    fn writes_raw_dwg_record(&self, object: &ObjectType) -> bool {
+        self.dwg_bridge && self.raw_dwg_references(object).is_some()
+    }
+
+    /// The handles after the class data of `object`'s DWG bytes, when it has bytes and no DXF form.
+    fn raw_dwg_references(&self, object: &ObjectType) -> Option<Vec<ProxyObjectReference>> {
+        let (data, bits, version) = match object {
+            ObjectType::Arch(object) if object.raw_dxf_codes.is_none() => (
+                object.raw_dwg_data.as_deref()?,
+                object.raw_dwg_handle_bits,
+                object.raw_dwg_version,
+            ),
+            ObjectType::Unknown {
+                raw_dxf_codes: None,
+                raw_dwg_data: Some(data),
+                raw_dwg_handle_bits,
+                raw_dwg_version,
+                type_name,
+                ..
+            } if !is_unrestorable_assoc_object(type_name) => {
+                (data.as_slice(), *raw_dwg_handle_bits, *raw_dwg_version)
+            }
+            _ => return None,
+        };
+        DwgObjectWriter::raw_record_references(data, bits, version.unwrap_or(self.dxf_version))
     }
 
     /// Build the set of all handles that will appear in the output DXF.
@@ -159,6 +215,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         // writer produces and audit-skip them, which would leave dangling
         // dictionary entries behind.
         for (h, obj) in document.objects.iter() {
+            // The bridge carries objects that exist only as DWG bytes as raw records.
+            if self.writes_raw_dwg_record(obj) {
+                set.insert(*h);
+                continue;
+            }
             match obj {
                 ObjectType::Unknown {
                     raw_dxf_codes,
@@ -180,7 +241,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     }
                 }
                 ObjectType::DynamicBlock(dynamic) => {
-                    if is_unrestorable_assoc_object(&dynamic.dxf_name) {
+                    // The bridge keeps the purge preventer, which BricsCAD's audit skips.
+                    if is_unrestorable_assoc_object(&dynamic.dxf_name) && !self.dwg_bridge {
                         continue;
                     }
                 }
@@ -6376,8 +6438,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 }
                 ObjectType::DynamicBlock(obj) => {
                     // The purge preventer is unrestorable (see
-                    // is_unrestorable_assoc_object) and gets audit-skipped.
-                    if is_unrestorable_assoc_object(&obj.dxf_name) {
+                    // is_unrestorable_assoc_object) and gets audit-skipped,
+                    // except in a DWG bridge, which only DxfReader reads.
+                    if is_unrestorable_assoc_object(&obj.dxf_name) && !self.dwg_bridge {
                         continue;
                     }
                     self.write_dynamic_block_object_dxf(obj)?
@@ -6398,12 +6461,60 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 ObjectType::RegisteredClass(obj) => self.write_registered_class_object_dxf(obj)?,
                 ObjectType::DgnLineStyle(obj) => self.write_dgn_line_style_object_dxf(obj)?,
                 ObjectType::ProxyObject(obj) => self.write_proxy_object_dxf(obj)?,
+                ObjectType::Arch(obj) if self.writes_raw_dwg_record(object) => {
+                    let (Some(data), version) = (obj.raw_dwg_data.as_deref(), obj.raw_dwg_version)
+                    else {
+                        continue;
+                    };
+                    self.write_raw_dwg_object(
+                        &RawDwgRecord {
+                            type_name: &obj.dxf_name,
+                            handle: obj.handle,
+                            owner: obj.owner,
+                            reactors: obj.reactors.clone(),
+                            xdictionary: obj.xdictionary_handle,
+                            cpp_class_name: Some(&obj.cpp_class_name),
+                            version,
+                            handle_bits: obj.raw_dwg_handle_bits,
+                            references: self.raw_dwg_references(object).unwrap_or_default(),
+                        },
+                        data,
+                    )?;
+                }
                 ObjectType::Arch(obj) => {
                     self.write_unknown_object(
                         &obj.dxf_name,
                         obj.handle,
                         obj.owner,
                         obj.raw_dxf_codes.as_deref(),
+                    )?;
+                }
+                ObjectType::Unknown {
+                    type_name,
+                    handle,
+                    owner,
+                    raw_dwg_data: Some(data),
+                    raw_dwg_handle_bits,
+                    raw_dwg_version,
+                    ..
+                } if self.writes_raw_dwg_record(object) => {
+                    self.write_raw_dwg_object(
+                        &RawDwgRecord {
+                            type_name,
+                            handle: *handle,
+                            owner: *owner,
+                            reactors: document
+                                .reactors_by_handle
+                                .get(handle)
+                                .cloned()
+                                .unwrap_or_default(),
+                            xdictionary: document.extension_dictionary_handle(*handle),
+                            cpp_class_name: None,
+                            version: *raw_dwg_version,
+                            handle_bits: *raw_dwg_handle_bits,
+                            references: self.raw_dwg_references(object).unwrap_or_default(),
+                        },
+                        data,
                     )?;
                 }
                 ObjectType::Unknown {
@@ -9782,6 +9893,56 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     /// Write an unknown object, preserving raw group codes if available.
+    /// Write an object that exists only as DWG bytes as a private record for a DWG bridge: the
+    /// record type is the object's class name (a host that keeps records by class keeps its
+    /// CLASS entry too), then reactors, extension dictionary and owner as in any object, then
+    /// the subclass `AcDbAcadrustRawDwgObject` with the class's C++ name (1, an Arch object
+    /// only), the handle-bit count (90), the source DWG version (3), the byte count (91) and the
+    /// merged-stream bytes (310 chunks). `DxfReader` reads it back into the raw form the DWG
+    /// writer writes again.
+    fn write_raw_dwg_object(&mut self, record: &RawDwgRecord, data: &[u8]) -> Result<()> {
+        self.writer.write_string(0, record.type_name)?;
+        self.writer.write_handle(5, record.handle)?;
+        self.write_reactor_group(record.reactors.clone())?;
+        if let Some(xdictionary) = record.xdictionary.filter(|handle| {
+            !handle.is_null()
+                && (self.valid_handles.is_empty() || self.valid_handles.contains(handle))
+        }) {
+            self.writer.write_string(102, "{ACAD_XDICTIONARY")?;
+            self.writer.write_handle(360, xdictionary)?;
+            self.writer.write_string(102, "}")?;
+        }
+        self.writer.write_handle(330, record.owner)?;
+        self.writer.write_subclass(RAW_DWG_OBJECT_SUBCLASS)?;
+        if let Some(cpp_class_name) = record.cpp_class_name {
+            self.writer.write_string(1, cpp_class_name)?;
+        }
+        self.writer.write_i32(90, record.handle_bits as i32)?;
+        let version = record
+            .version
+            .map_or(self.source_dwg_context.map(|(v, _)| v), Some)
+            .unwrap_or(self.dxf_version);
+        self.writer.write_string(3, version.to_dxf_string())?;
+        self.writer.write_i32(91, data.len() as i32)?;
+        for chunk in data.chunks(127) {
+            self.writer.write_binary(310, chunk)?;
+        }
+        // The handles after the class data, as pointer groups a host that renumbers handles
+        // remaps: 330 soft pointer, 340 hard pointer, 350 soft owner, 360 hard owner, 390 undefined.
+        self.writer.write_i32(92, record.references.len() as i32)?;
+        for reference in &record.references {
+            let code = match reference.kind {
+                ProxyReferenceKind::SoftPointer => 330,
+                ProxyReferenceKind::HardPointer => 340,
+                ProxyReferenceKind::SoftOwnership => 350,
+                ProxyReferenceKind::HardOwnership => 360,
+                ProxyReferenceKind::Undefined => 390,
+            };
+            self.writer.write_handle(code, reference.handle)?;
+        }
+        Ok(())
+    }
+
     fn write_unknown_object(
         &mut self,
         type_name: &str,
