@@ -1346,6 +1346,19 @@ impl<'a> DwgObjectWriter<'a> {
             right_margin: value.horizontal_margin,
             horizontal_spacing: 0.18,
             vertical_spacing: 0.18,
+            // The six borders AutoCAD writes for this cell style: all hidden, by block.
+            borders: [1, 2, 4, 8, 16, 32]
+                .into_iter()
+                .map(|index_mask| TableGridFormat {
+                    index_mask,
+                    border: TableCellBorder {
+                        is_invisible: true,
+                        double_line_spacing: 0.045,
+                        ..TableCellBorder::default()
+                    },
+                    line_type: Handle::NULL,
+                })
+                .collect(),
             ..TableCellStyleData::default()
         };
         self.write_named_table_cell_style(&NamedTableCellStyle {

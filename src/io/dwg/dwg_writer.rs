@@ -757,6 +757,22 @@ pub(crate) fn prepare_table_keys(document: &mut std::borrow::Cow<'_, CadDocument
     document.to_mut().resync_table_keys();
 }
 
+/// Whether a table style's cell style map still holds the style's own cell styles. AutoCAD keeps
+/// the map its 2007-format saves left on an R2010+ drawing's table styles, so a matching one stays;
+/// a map the style has moved on from is dropped.
+fn cell_style_map_matches(style: &crate::objects::ObjectType, map: &crate::objects::DataObject) -> bool {
+    let (
+        crate::objects::ObjectType::TableStyle(style),
+        crate::objects::DataObjectData::CellStyleMap(map),
+    ) = (style, &map.data)
+    else {
+        return false;
+    };
+    map.cells
+        .iter()
+        .eq(style.modern_overrides.iter().map(|(_, own)| own))
+}
+
 fn prepare_roundtrip_records(document: &mut std::borrow::Cow<'_, CadDocument>) {
     use crate::objects::{ObjectType, XRecordValue};
     if document.version < DxfVersion::AC1024 {
@@ -784,8 +800,8 @@ fn prepare_roundtrip_records(document: &mut std::borrow::Cow<'_, CadDocument>) {
             let drop = match (name.as_str(), document.objects.get(child)) {
                 (
                     "ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP",
-                    Some(ObjectType::DataObject(_)),
-                ) => !is_visual_style,
+                    Some(ObjectType::DataObject(map)),
+                ) => !is_visual_style && !cell_style_map_matches(object, map),
                 ("ACAD_XREC_ROUNDTRIP", Some(ObjectType::XRecord(record))) => {
                     let prefix = if is_visual_style {
                         "RTVS"
