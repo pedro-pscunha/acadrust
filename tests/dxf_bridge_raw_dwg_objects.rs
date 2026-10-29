@@ -492,6 +492,33 @@ fn the_eed_of_a_raw_record_does_not_move_to_the_appid_that_takes_the_old_handle(
     assert_eq!(eed_of(&again, f.arch, "OTHERAPP"), None);
 }
 
+/// A record that came back through a bridge holds its EED as XDATA, so a second bridge writes that
+/// XDATA, not the stale handles in the record's bytes: the application that took the old handle
+/// does not receive the block, and the second bridge reports nothing dropped.
+#[test]
+fn a_second_bridge_keeps_the_eed_with_its_application() {
+    let (mut f, application) = with_eed(true);
+    let other = f.doc.allocate_handle();
+    let mut app = acadrust::tables::AppId::new("OTHERAPP");
+    app.handle = other;
+    f.doc.app_ids.add(app).expect("add appid");
+    let dxf = text(DxfWriter::new(&f.doc).for_dwg_bridge());
+    let moved = Handle::new(application.value() + 0x5000);
+    let swapped = renumbered(&renumbered(&dxf, application, moved), other, application);
+    let back = read_dxf(swapped.into_bytes());
+    assert!(DxfWriter::new(&back)
+        .for_dwg_bridge()
+        .omitted_architecture_records()
+        .is_empty());
+    let second = bridged(&back);
+    let again = through_dwg(&second);
+    assert_eq!(
+        eed_of(&again, f.arch, APPLICATION),
+        Some((moved, eed_values()))
+    );
+    assert_eq!(eed_of(&again, f.arch, "OTHERAPP"), None);
+}
+
 #[test]
 fn an_eed_block_of_an_unknown_application_is_dropped_and_reported() {
     let (f, application) = with_eed(false);

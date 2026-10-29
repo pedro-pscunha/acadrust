@@ -120,6 +120,20 @@ pub(crate) fn raw_dwg_eed(
     default_version: DxfVersion,
 ) -> Option<RawDwgEed> {
     let (data, bits, version) = raw_dwg_parts(object)?;
+    // A record that a bridge DXF gave back holds its EED as the XDATA of the document, by
+    // application name; the handles in its bytes are the ones of the DWG it first came from.
+    if let ObjectType::Arch(arch) = object {
+        if arch.raw_dwg_references.is_some() {
+            return Some(RawDwgEed {
+                xdata: document
+                    .object_xdata
+                    .get(&arch.handle)
+                    .cloned()
+                    .unwrap_or_default(),
+                dropped: Vec::new(),
+            });
+        }
+    }
     let version = version.unwrap_or(default_version);
     let blocks = DwgObjectWriter::raw_record_eed(data, bits, version)?;
     let mut eed = RawDwgEed {
