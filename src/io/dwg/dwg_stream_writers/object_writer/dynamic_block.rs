@@ -795,8 +795,8 @@ mod properties_table_reference_tests {
 
     /// The fields of a table of one column and no row, in the order of the DWG: the column stores
     /// a reference to its parameter before its metadata (DXF 340) and a second handle after it
-    /// (DXF 340 after the 302), null in a real drawing.
-    fn fields() -> Vec<Field> {
+    /// (DXF 340 after the 302), null in the drawings seen so far.
+    fn fields(owned: u64) -> Vec<Field> {
         let text = |code, value: &str| Field {
             code,
             value: Value::Text(value.into()),
@@ -820,7 +820,7 @@ mod properties_table_reference_tests {
         fields.extend([int(90, 0), int(170, 0), int(170, 0)]);
         fields.extend((290..=294).map(flag));
         fields.push(text(302, ""));
-        fields.push(handle(0));
+        fields.push(handle(owned));
         fields.extend([int(92, 0), int(93, 0)]);
         fields.extend((290..=292).map(flag));
         fields
@@ -828,7 +828,7 @@ mod properties_table_reference_tests {
 
     /// The reference types of the column's two handles. The record is written natively (an
     /// unchanged DWG read would reuse the raw record).
-    fn stored_references(version: DxfVersion) -> [DwgReferenceType; 2] {
+    fn stored_references(version: DxfVersion, owned: u64) -> [DwgReferenceType; 2] {
         let mut document = CadDocument::with_version(version);
         let handle = document.allocate_handle();
         let mut object =
@@ -837,7 +837,7 @@ mod properties_table_reference_tests {
         object.owner = document.header.named_objects_dict_handle;
         object.data = DynamicBlockData::PropertiesTable(BlockPropertiesTable {
             parameter: Default::default(),
-            fields: fields(),
+            fields: fields(owned),
         });
         document
             .objects
@@ -864,7 +864,7 @@ mod properties_table_reference_tests {
             let (value, kind) = merged.read_typed_handle();
             if value == PARAMETER {
                 let (second, second_kind) = merged.read_typed_handle();
-                assert_eq!(second, 0, "the second handle is null");
+                assert_eq!(second, owned, "the second handle keeps its value");
                 return [kind, second_kind];
             }
         }
@@ -872,15 +872,17 @@ mod properties_table_reference_tests {
     }
 
     /// AutoCAD stores the parameter reference of a column as a hard pointer (5) and the handle
-    /// after it as a hard owner (3), also when it is null.
+    /// after it as a hard owner (3), also when it is not null: the role decides the kind.
     #[test]
     fn a_column_keeps_a_hard_pointer_and_a_hard_owner() {
         for version in [DxfVersion::AC1018, DxfVersion::AC1032] {
-            assert_eq!(
-                stored_references(version),
-                [DwgReferenceType::HardPointer, DwgReferenceType::HardOwnership],
-                "{version:?}"
-            );
+            for owned in [0, 0x7102] {
+                assert_eq!(
+                    stored_references(version, owned),
+                    [DwgReferenceType::HardPointer, DwgReferenceType::HardOwnership],
+                    "{version:?} owned {owned:#x}"
+                );
+            }
         }
     }
 }
