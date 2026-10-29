@@ -668,6 +668,14 @@ pub struct HeaderVariables {
     pub current_multiline_style_handle: Handle,
     /// Current material handle
     pub current_material_handle: Handle,
+    /// INTERFEREOBJVS - visual style of interference objects (R2007+)
+    pub interference_object_visual_style_handle: Handle,
+    /// INTERFEREVPVS - visual style of the viewport during an interference check (R2007+)
+    pub interference_viewport_visual_style_handle: Handle,
+    /// DRAGVS - visual style while dragging in 3D (R2007+)
+    pub drag_visual_style_handle: Handle,
+    /// CEPSNID - plot style of new objects, when CEPSNTYPE is 3 (by object)
+    pub current_plotstyle_handle: Handle,
     /// Dimension text style handle
     pub dim_text_style_handle: Handle,
     /// Dimension linetype handle
@@ -1091,6 +1099,10 @@ impl Default for HeaderVariables {
             current_dimstyle_handle: Handle::NULL,
             current_multiline_style_handle: Handle::NULL,
             current_material_handle: Handle::NULL,
+            interference_object_visual_style_handle: Handle::NULL,
+            interference_viewport_visual_style_handle: Handle::NULL,
+            drag_visual_style_handle: Handle::NULL,
+            current_plotstyle_handle: Handle::NULL,
             dim_text_style_handle: Handle::NULL,
             dim_linetype_handle: Handle::NULL,
             dim_linetype1_handle: Handle::NULL,

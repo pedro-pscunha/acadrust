@@ -782,7 +782,7 @@ fn read_header_fields(r: &mut SectionReader, v: DxfVersion, h: &mut HeaderVariab
         h.current_plotstyle_type = r.read_bit_short();
 
         if h.current_plotstyle_type == 3 {
-            let _ = r.read_handle(); // CPSNID
+            h.current_plotstyle_handle = Handle::new(r.read_handle()); // CPSNID
         }
 
         h.fingerprint_guid = r.read_variable_text();
@@ -847,9 +847,9 @@ fn read_header_fields(r: &mut SectionReader, v: DxfVersion, h: &mut HeaderVariab
 
         h.interference_color = r.read_cm_color();
 
-        let _ = r.read_handle(); // INTERFEREOBJVS
-        let _ = r.read_handle(); // INTERFEREVPVS
-        let _ = r.read_handle(); // DRAGVS
+        h.interference_object_visual_style_handle = Handle::new(r.read_handle()); // INTERFEREOBJVS
+        h.interference_viewport_visual_style_handle = Handle::new(r.read_handle()); // INTERFEREVPVS
+        h.drag_visual_style_handle = Handle::new(r.read_handle()); // DRAGVS
 
         h.cast_shadow = r.read_byte() as i16; // CSHADOW
         h.shadow_plane_location = r.read_bit_double();

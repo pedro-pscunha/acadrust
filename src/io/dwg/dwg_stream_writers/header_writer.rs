@@ -854,7 +854,7 @@ fn write_header_fields(w: &mut SectionWriter, v: DxfVersion, h: &HeaderVariables
 
         if h.current_plotstyle_type == 3 {
             // CPSNID (only if CEPSNTYPE == 3/ByObjectId)
-            w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL);
+            w.write_handle_ref(DwgReferenceType::HardPointer, h.current_plotstyle_handle);
         }
 
         w.write_variable_text(&h.fingerprint_guid);
@@ -928,9 +928,15 @@ fn write_header_fields(w: &mut SectionWriter, v: DxfVersion, h: &HeaderVariables
 
         w.write_cm_color(&h.interference_color);
 
-        w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL); // INTERFEREOBJVS
-        w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL); // INTERFEREVPVS
-        w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL); // DRAGVS
+        w.write_handle_ref(
+            DwgReferenceType::HardPointer,
+            h.interference_object_visual_style_handle,
+        ); // INTERFEREOBJVS
+        w.write_handle_ref(
+            DwgReferenceType::HardPointer,
+            h.interference_viewport_visual_style_handle,
+        ); // INTERFEREVPVS
+        w.write_handle_ref(DwgReferenceType::HardPointer, h.drag_visual_style_handle); // DRAGVS
 
         w.write_byte(h.cast_shadow as u8); // CSHADOW
         w.write_bit_double(h.shadow_plane_location);

@@ -1580,11 +1580,26 @@ fn prepare_header(
         }
     }
 
-    // R2007+: current_material_handle — validate against emitted objects.
-    // Unsupported raw materials may be dropped during a version conversion.
-    {
-        if !emitted(h.current_material_handle) {
-            h.current_material_handle = Handle::NULL;
+    // R2007+: the current material and the visual styles the header points at — validate
+    // against emitted objects. Unsupported raw objects may be dropped during a version
+    // conversion.
+    for handle in [
+        &mut h.current_material_handle,
+        &mut h.interference_object_visual_style_handle,
+        &mut h.interference_viewport_visual_style_handle,
+        &mut h.drag_visual_style_handle,
+    ] {
+        if !emitted(*handle) {
+            *handle = Handle::NULL;
+        }
+    }
+
+    // The plot style of new objects: a type 3 names an object, and without that object the
+    // type falls back to 0 (by layer).
+    if !emitted(h.current_plotstyle_handle) {
+        h.current_plotstyle_handle = Handle::NULL;
+        if h.current_plotstyle_type == 3 {
+            h.current_plotstyle_type = 0;
         }
     }
 

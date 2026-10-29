@@ -2813,6 +2813,30 @@ impl<'a> SectionReader<'a> {
                             hdr.current_plotstyle_type = v;
                         }
                     }
+                    // The plot style a type 3 names follows in group 390.
+                    if let Some(p) = self.reader.read_pair()? {
+                        match (p.code, p.as_handle()) {
+                            (390, Some(handle)) => {
+                                hdr.current_plotstyle_handle = Handle::new(handle);
+                            }
+                            _ => self.reader.push_back(p),
+                        }
+                    }
+                }
+                "$CMATERIAL" | "$INTERFEREOBJVS" | "$INTERFEREVPVS" | "$DRAGVS" => {
+                    if let Some(handle) = self.reader.read_pair()?.and_then(|p| p.as_handle()) {
+                        let handle = Handle::new(handle);
+                        match var_name.as_str() {
+                            "$CMATERIAL" => hdr.current_material_handle = handle,
+                            "$INTERFEREOBJVS" => {
+                                hdr.interference_object_visual_style_handle = handle;
+                            }
+                            "$INTERFEREVPVS" => {
+                                hdr.interference_viewport_visual_style_handle = handle;
+                            }
+                            _ => hdr.drag_visual_style_handle = handle,
+                        }
+                    }
                 }
                 "$ENDCAPS" => {
                     if let Some(p) = self.reader.read_pair()? {

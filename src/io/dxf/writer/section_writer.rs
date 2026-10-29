@@ -1134,6 +1134,61 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if !hdr.menu_name.is_empty() {
             self.write_header_variable("$MENU", |w| w.write_string(1, &hdr.menu_name))?;
         }
+        self.write_header_object_pointers(hdr)
+    }
+
+    /// Whether a header pointer names a record this file holds. A handle read from a DWG names
+    /// an object that is not always written to the DXF, and a dangling pointer is not valid.
+    fn header_pointer_is_written(&self, handle: crate::types::Handle) -> bool {
+        !handle.is_null() && (self.valid_handles.is_empty() || self.valid_handles.contains(&handle))
+    }
+
+    /// Header variables that point at an object: the current material, the visual styles of
+    /// interference objects, interference viewports and 3D drag, and the plot style of new
+    /// objects. A DWG header holds each as a handle; the DXF reference gives them the groups
+    /// 347, 345, 346, 349 and, for the plot style, 380 (the type) with the handle in 390.
+    fn write_header_object_pointers(
+        &mut self,
+        hdr: &crate::document::HeaderVariables,
+    ) -> Result<()> {
+        if self.dxf_version >= DxfVersion::AC1021 {
+            for (name, code, handle) in [
+                ("$CMATERIAL", 347, hdr.current_material_handle),
+                (
+                    "$INTERFEREOBJVS",
+                    345,
+                    hdr.interference_object_visual_style_handle,
+                ),
+                (
+                    "$INTERFEREVPVS",
+                    346,
+                    hdr.interference_viewport_visual_style_handle,
+                ),
+                ("$DRAGVS", 349, hdr.drag_visual_style_handle),
+            ] {
+                if self.header_pointer_is_written(handle) {
+                    self.write_header_variable(name, |w| w.write_handle(code, handle))?;
+                }
+            }
+        }
+        if self.dxf_version >= DxfVersion::AC1015 {
+            let plot_style = hdr.current_plotstyle_handle;
+            // Type 3 is a plot style named by its object; a type without that object is 0.
+            let by_object =
+                hdr.current_plotstyle_type == 3 && self.header_pointer_is_written(plot_style);
+            let kind = if hdr.current_plotstyle_type == 3 && !by_object {
+                0
+            } else {
+                hdr.current_plotstyle_type
+            };
+            self.write_header_variable("$CEPSNTYPE", |w| {
+                w.write_i16(380, kind)?;
+                if by_object {
+                    w.write_handle(390, plot_style)?;
+                }
+                Ok(())
+            })?;
+        }
         Ok(())
     }
 
