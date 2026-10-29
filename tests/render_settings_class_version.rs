@@ -127,3 +127,72 @@ fn the_class_version_of_a_dxf_follows_the_dwg() {
         );
     }
 }
+
+/// CADCraft's path: an R2018 DWG is read, written as a bridge DXF of an older release (R2000),
+/// read again, its version raised to R2018, and written as a DWG. The class version must be the
+/// same on every leg, whatever release the DXF is.
+#[test]
+fn the_class_version_survives_a_dxf_of_another_release() {
+    let (document, mental, rapid) = document(DxfVersion::AC1032);
+    let bytes = DwgWriter::write_to_vec(&document).expect("write dwg");
+    let read = DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg");
+    assert_eq!(class_versions(&read, mental, rapid), (2, 2), "DWG read");
+    for release in [DxfVersion::AC1015, DxfVersion::AC1027, DxfVersion::AC1032] {
+        let dxf = DxfWriter::new(&read)
+            .with_version(release)
+            .for_dwg_bridge()
+            .write_to_vec()
+            .expect("write dxf");
+        let mut from_dxf = DxfReader::from_reader(Cursor::new(dxf))
+            .expect("reader")
+            .read()
+            .expect("read dxf");
+        assert_eq!(
+            class_versions(&from_dxf, mental, rapid),
+            (2, 2),
+            "{release:?}: DXF read"
+        );
+        from_dxf.version = DxfVersion::AC1032;
+        let bytes = DwgWriter::write_to_vec(&from_dxf).expect("write dwg");
+        let back = DwgReader::from_stream(Cursor::new(bytes))
+            .read()
+            .expect("read dwg");
+        assert_eq!(
+            class_versions(&back, mental, rapid),
+            (2, 2),
+            "{release:?}: DWG written as R2018"
+        );
+    }
+}
+
+/// The DXF that acadrust writes for an R2018 drawing reaches a host that rewrites it as an R2000
+/// DXF (its header says AC1015) with the same groups, and acadrust reads that.
+#[test]
+fn the_class_version_survives_a_host_that_declares_an_older_release() {
+    let (document, mental, rapid) = document(DxfVersion::AC1032);
+    let bytes = DwgWriter::write_to_vec(&document).expect("write dwg");
+    let read = DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg");
+    let dxf = DxfWriter::new(&read)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
+    let text = String::from_utf8(dxf).expect("utf8");
+    assert!(text.contains("AC1032"), "an R2018 DXF");
+    let declared = text.replacen("AC1032", "AC1015", 1);
+    let mut from_dxf = DxfReader::from_reader(Cursor::new(declared.into_bytes()))
+        .expect("reader")
+        .read()
+        .expect("read dxf");
+    assert_eq!(from_dxf.version, DxfVersion::AC1015);
+    assert_eq!(class_versions(&from_dxf, mental, rapid), (2, 2), "DXF read");
+    from_dxf.version = DxfVersion::AC1032;
+    let bytes = DwgWriter::write_to_vec(&from_dxf).expect("write dwg");
+    let back = DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg");
+    assert_eq!(class_versions(&back, mental, rapid), (2, 2), "DWG as R2018");
+}
