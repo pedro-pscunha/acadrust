@@ -46,14 +46,16 @@ fn arc_text() -> ArcAlignedTextData {
 }
 
 fn large_radial() -> DimensionLargeRadial {
-    let mut d = DimensionLargeRadial::default();
-    d.definition_point = Vector3::new(10., 0., 0.);
-    d.chord_point = Vector3::new(0., 10., 0.);
+    let mut d = DimensionLargeRadial {
+        definition_point: Vector3::new(10., 0., 0.),
+        chord_point: Vector3::new(0., 10., 0.),
+        override_center: Vector3::new(2., 2., 0.),
+        jog_point: Vector3::new(5., 5., 0.),
+        jog_angle: 45_f64.to_radians(),
+        ..DimensionLargeRadial::default()
+    };
     d.base.definition_point = d.definition_point;
     d.base.text_middle_point = Vector3::new(4., 6., 0.);
-    d.override_center = Vector3::new(2., 2., 0.);
-    d.jog_point = Vector3::new(5., 5., 0.);
-    d.jog_angle = 45_f64.to_radians();
     d
 }
 
