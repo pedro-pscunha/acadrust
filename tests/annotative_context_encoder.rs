@@ -295,7 +295,11 @@ fn synth_mtext_columns_roundtrips() {
     // Dynamic columns with explicit heights — exercises the column branch.
     let kind = ObjectContextKind::MText(MTextContext {
         attachment: 1,
-        x_axis_dir: Vector3::new(0.7071, 0.7071, 0.0),
+        x_axis_dir: Vector3::new(
+            std::f64::consts::FRAC_1_SQRT_2,
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+        ),
         insertion: Vector3::new(1.0, 2.0, 3.0),
         rect_width: 100.0,
         rect_height: 50.0,

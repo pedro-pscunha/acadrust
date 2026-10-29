@@ -217,7 +217,7 @@ mod tests {
         let var = DictionaryVariable::with_value("3.14159");
         let result = var.as_f64();
         assert!(result.is_some());
-        assert!((result.unwrap() - 3.14159).abs() < 1e-5);
+        assert!((result.unwrap() - std::f64::consts::PI).abs() < 1e-5);
 
         let invalid = DictionaryVariable::with_value("not_a_number");
         assert!(invalid.as_f64().is_none());

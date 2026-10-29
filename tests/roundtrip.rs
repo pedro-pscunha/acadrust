@@ -1920,7 +1920,7 @@ fn dxf_roundtrip_header_variables() {
     let mut doc = CadDocument::with_version(DxfVersion::AC1032);
     doc.header.fill_mode = false;
     doc.header.ortho_mode = true;
-    doc.header.linetype_scale = 3.14;
+    doc.header.linetype_scale = std::f64::consts::PI;
     doc.header.text_height = 5.0;
     doc.header.linear_unit_format = 2;
     doc.header.insertion_units = 4;
@@ -1932,7 +1932,7 @@ fn dxf_roundtrip_header_variables() {
     assert_eq!(rt.header.fill_mode, false, "fill_mode not preserved");
     assert_eq!(rt.header.ortho_mode, true, "ortho_mode not preserved");
     assert!(
-        (rt.header.linetype_scale - 3.14).abs() < 1e-10,
+        (rt.header.linetype_scale - std::f64::consts::PI).abs() < 1e-10,
         "linetype_scale not preserved"
     );
     assert!(
@@ -1962,7 +1962,7 @@ fn dwg_roundtrip_header_variables() {
     let mut doc = CadDocument::with_version(DxfVersion::AC1032);
     doc.header.fill_mode = false;
     doc.header.ortho_mode = true;
-    doc.header.linetype_scale = 3.14;
+    doc.header.linetype_scale = std::f64::consts::PI;
     doc.header.text_height = 5.0;
     doc.header.linear_unit_format = 2;
     doc.header.insertion_units = 4;
@@ -1974,7 +1974,7 @@ fn dwg_roundtrip_header_variables() {
     assert_eq!(rt.header.fill_mode, false, "fill_mode not preserved");
     assert_eq!(rt.header.ortho_mode, true, "ortho_mode not preserved");
     assert!(
-        (rt.header.linetype_scale - 3.14).abs() < 1e-10,
+        (rt.header.linetype_scale - std::f64::consts::PI).abs() < 1e-10,
         "linetype_scale not preserved"
     );
     assert!(
