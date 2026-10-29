@@ -1138,6 +1138,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if version >= AC1015 && !hdr.stylesheet.is_empty() {
             self.write_header_variable("$STYLESHEET", |w| w.write_string(7, &hdr.stylesheet))?;
         }
+        if version >= AC1018 && !hdr.project_name.is_empty() {
+            self.write_header_variable("$PROJECTNAME", |w| w.write_string(1, &hdr.project_name))?;
+        }
         self.write_header_object_pointers(hdr)
     }
 
