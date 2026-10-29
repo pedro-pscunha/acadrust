@@ -246,6 +246,9 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     /// Viewport IDs (69) derived per paper-space block when the source does
     /// not store them, reserving explicit IDs before filling gaps.
     paper_viewport_ids: HashMap<Handle, i16>,
+    /// Group 91 of a proxy for each class number of the document: 500 plus the position of the
+    /// class in the CLASSES section.
+    proxy_class_groups: HashMap<i32, i32>,
     /// Set of all handles that will exist in the output DXF.
     /// Used to filter reactor/xdictionary references to non-existent objects.
     valid_handles: HashSet<Handle>,
@@ -292,6 +295,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             sab_entries: Vec::new(),
             writing_paper_space: false,
             paper_viewport_ids: HashMap::new(),
+            proxy_class_groups: HashMap::new(),
             valid_handles: HashSet::new(),
             bylayer_linetype_handle: Handle::NULL,
             byblock_linetype_handle: Handle::NULL,
@@ -1467,7 +1471,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     pub fn write_classes(&mut self, document: &CadDocument) -> Result<()> {
         self.writer.write_section_start("CLASSES")?;
 
-        for class in document.classes.iter() {
+        for (position, class) in document.classes.iter().enumerate() {
+            self.proxy_class_groups
+                .insert(i32::from(class.class_number), 500 + position as i32);
             self.writer.write_string(0, "CLASS")?;
             self.writer.write_string(1, &class.dxf_name)?;
             self.writer.write_string(2, &class.cpp_class_name)?;
@@ -7207,7 +7213,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     ) -> Result<()> {
         let v2010 = self.dxf_version >= DxfVersion::AC1024;
         self.writer.write_i32(90, proxy_id)?;
-        self.writer.write_i32(91, class_id)?;
+        // A proxy names its class by the position of the class in the CLASSES section.
+        let class_group = self
+            .proxy_class_groups
+            .get(&class_id)
+            .copied()
+            .unwrap_or(class_id);
+        self.writer.write_i32(91, class_group)?;
         if self.dxf_version >= DxfVersion::AC1032 {
             self.writer.write_i32(71, dwg_version)?;
             self.writer.write_i32(97, maintenance_version)?;

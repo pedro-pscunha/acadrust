@@ -57,6 +57,9 @@ pub struct DxfReader {
     /// Estimated entity count based on stream size (used for pre-allocation).
     estimated_entities: usize,
     source_path: Option<String>,
+    /// The class number in the document of each class of the CLASSES section, in file order. A
+    /// proxy names its class by its position in that section.
+    class_numbers: Vec<i32>,
 }
 
 impl DxfReader {
@@ -90,6 +93,7 @@ impl DxfReader {
             config: DxfReaderConfiguration::default(),
             estimated_entities,
             source_path: None,
+            class_numbers: Vec::new(),
         })
     }
 
@@ -125,6 +129,7 @@ impl DxfReader {
             config: DxfReaderConfiguration::default(),
             estimated_entities,
             source_path,
+            class_numbers: Vec::new(),
         })
     }
 
@@ -458,7 +463,9 @@ impl DxfReader {
     /// Read the CLASSES section
     fn read_classes_section(&mut self, document: &mut CadDocument) -> Result<()> {
         let mut section_reader = SectionReader::new(&mut self.reader);
-        section_reader.read_classes(document)
+        let result = section_reader.read_classes(document);
+        self.class_numbers = section_reader.take_class_numbers();
+        result
     }
 
     /// Read the TABLES section
@@ -470,7 +477,9 @@ impl DxfReader {
         diagnostics: &mut Vec<ReadDiagnostic>,
     ) -> Result<()> {
         let mut section_reader =
-            SectionReader::new(&mut self.reader).with_failsafe(self.config.failsafe);
+            SectionReader::new(&mut self.reader)
+                .with_failsafe(self.config.failsafe)
+                .with_class_numbers(self.class_numbers.clone());
         let result = section_reader.read_tables(document);
         *decoded_records = decoded_records.saturating_add(section_reader.decoded_records());
         Self::collect_section_recovery(
@@ -492,7 +501,9 @@ impl DxfReader {
         diagnostics: &mut Vec<ReadDiagnostic>,
     ) -> Result<()> {
         let mut section_reader =
-            SectionReader::new(&mut self.reader).with_failsafe(self.config.failsafe);
+            SectionReader::new(&mut self.reader)
+                .with_failsafe(self.config.failsafe)
+                .with_class_numbers(self.class_numbers.clone());
         let result = section_reader.read_blocks(document);
         *decoded_records = decoded_records.saturating_add(section_reader.decoded_records());
         Self::collect_section_recovery(
@@ -514,7 +525,9 @@ impl DxfReader {
         diagnostics: &mut Vec<ReadDiagnostic>,
     ) -> Result<()> {
         let mut section_reader =
-            SectionReader::new(&mut self.reader).with_failsafe(self.config.failsafe);
+            SectionReader::new(&mut self.reader)
+                .with_failsafe(self.config.failsafe)
+                .with_class_numbers(self.class_numbers.clone());
         let result = section_reader.read_entities(document);
         *decoded_records = decoded_records.saturating_add(section_reader.decoded_records());
         Self::collect_section_recovery(
@@ -536,7 +549,9 @@ impl DxfReader {
         diagnostics: &mut Vec<ReadDiagnostic>,
     ) -> Result<()> {
         let mut section_reader =
-            SectionReader::new(&mut self.reader).with_failsafe(self.config.failsafe);
+            SectionReader::new(&mut self.reader)
+                .with_failsafe(self.config.failsafe)
+                .with_class_numbers(self.class_numbers.clone());
         let result = section_reader.read_objects(document);
         *decoded_records = decoded_records.saturating_add(section_reader.decoded_records());
         Self::collect_section_recovery(

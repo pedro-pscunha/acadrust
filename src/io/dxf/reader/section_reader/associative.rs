@@ -391,10 +391,7 @@ fn read_circle_reserved(cursor: &mut AssocCursor<'_>) -> f64 {
     }
 }
 
-fn read_constraint_data(
-    cursor: &mut AssocCursor<'_>,
-    class_name: &str,
-) -> AssocConstraintNodeData {
+fn read_constraint_data(cursor: &mut AssocCursor<'_>, class_name: &str) -> AssocConstraintNodeData {
     match class_name.to_ascii_uppercase().as_str() {
         "ACG2SMOOTHCONSTRAINT" => {
             let (owner_id, is_implied, is_active) = read_constraint_geometry(cursor);

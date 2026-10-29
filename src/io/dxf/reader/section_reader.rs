@@ -1616,6 +1616,8 @@ pub struct SectionReader<'a> {
     failsafe: bool,
     skipped_records: usize,
     recovery_errors: Vec<SectionRecoveryError>,
+    /// The class number in the document of each class of the CLASSES section, in file order.
+    class_numbers: Vec<i32>,
 }
 
 /// The `102 {ACAD_REACTORS` and `102 {ACAD_XDICTIONARY` groups of an object whose record has no
@@ -1674,6 +1676,33 @@ impl<'a> SectionReader<'a> {
             failsafe: false,
             skipped_records: 0,
             recovery_errors: Vec::new(),
+            class_numbers: Vec::new(),
+        }
+    }
+
+    /// Give the section the class numbers of the CLASSES section (see `read_classes`).
+    pub fn with_class_numbers(mut self, class_numbers: Vec<i32>) -> Self {
+        self.class_numbers = class_numbers;
+        self
+    }
+
+    pub fn take_class_numbers(&mut self) -> Vec<i32> {
+        std::mem::take(&mut self.class_numbers)
+    }
+
+    /// The class number in the document of the class that group 91 of a proxy names. The group
+    /// holds 500 plus the position of the class in the CLASSES section of the file, and the
+    /// document numbers its classes in another order. A file without a CLASSES section keeps the
+    /// value as it is.
+    fn proxy_class_number(&self, group_value: i32) -> Result<i32> {
+        if group_value < 500 || self.class_numbers.is_empty() {
+            return Ok(group_value);
+        }
+        match self.class_numbers.get((group_value - 500) as usize) {
+            Some(&number) if number != 0 => Ok(number),
+            _ => Err(crate::error::DxfError::Parse(format!(
+                "proxy class {group_value} names no class of the CLASSES section"
+            ))),
         }
     }
 
@@ -3688,9 +3717,17 @@ impl<'a> SectionReader<'a> {
                         _ => {}
                     }
                 }
-                if !class.dxf_name.is_empty() {
+                let number = if class.dxf_name.is_empty() {
+                    0
+                } else {
+                    let name = class.dxf_name.clone();
                     document.classes.add_or_update(class);
-                }
+                    document
+                        .classes
+                        .get_by_name(&name)
+                        .map_or(0, |class| i32::from(class.class_number))
+                };
+                self.class_numbers.push(number);
             }
         }
 
@@ -12443,7 +12480,7 @@ impl<'a> SectionReader<'a> {
                         });
                 }
                 90 => object.proxy_id = pair.as_i32().unwrap_or(499),
-                91 => object.class_id = pair.as_i32().unwrap_or(499),
+                91 => object.class_id = self.proxy_class_number(pair.as_i32().unwrap_or(499))?,
                 95 => object.version = pair.as_i32().unwrap_or(0),
                 71 => object.dwg_version = pair.as_i32().unwrap_or(0),
                 97 => object.maintenance_version = pair.as_i32().unwrap_or(0),
@@ -15431,7 +15468,7 @@ impl<'a> SectionReader<'a> {
                     append_hex_bytes(&mut common_graphics, &pair.value_string);
                 }
                 90 => proxy_id = pair.as_i32().unwrap_or(498),
-                91 => class_id = pair.as_i32().unwrap_or(0),
+                91 => class_id = self.proxy_class_number(pair.as_i32().unwrap_or(0))?,
                 95 => version = pair.as_i32().unwrap_or(0),
                 71 => dwg_version = pair.as_i32().unwrap_or(0),
                 97 => maintenance_version = pair.as_i32().unwrap_or(0),

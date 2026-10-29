@@ -169,6 +169,32 @@ struct ParallelEntityBatch {
     class_counts_complete: bool,
 }
 
+/// A proxy names its class by the class number of the DWG. When it also names the class by its
+/// DXF name, both must be the same class: AutoCAD binds the proxy to the number, so a number that
+/// names another class makes it read the payload as that class (and can crash).
+fn check_proxy_class(
+    document: &CadDocument,
+    class_id: i32,
+    dxf_subclass: &str,
+) -> crate::error::Result<()> {
+    if dxf_subclass.is_empty() {
+        return Ok(());
+    }
+    let named = document
+        .classes
+        .iter()
+        .find(|class| i32::from(class.class_number) == class_id)
+        .map(|class| class.dxf_name.as_str());
+    if named.is_some_and(|name| name.eq_ignore_ascii_case(dxf_subclass)) {
+        Ok(())
+    } else {
+        Err(crate::error::DxfError::Parse(format!(
+            "proxy of class {dxf_subclass} has class number {class_id}, which names {}",
+            named.unwrap_or("no class")
+        )))
+    }
+}
+
 impl<'a> DwgObjectWriter<'a> {
     // ── Constructor ─────────────────────────────────────────────────
 
@@ -187,6 +213,11 @@ impl<'a> DwgObjectWriter<'a> {
         // value is higher.
         let mut max_h = document.header.handle_seed;
         for entity in document.entities() {
+            if let EntityType::Extended(extended) = entity {
+                if let crate::entities::ExtendedEntityData::Proxy(data) = &extended.data {
+                    check_proxy_class(document, data.class_id, &data.dxf_subclass)?;
+                }
+            }
             let h = entity.common().handle.value() + 1;
             if h > max_h {
                 max_h = h;
@@ -232,6 +263,9 @@ impl<'a> DwgObjectWriter<'a> {
             }) = object
             {
                 table.validate()?;
+            }
+            if let ObjectType::ProxyObject(proxy) = object {
+                check_proxy_class(document, proxy.class_id, &proxy.dxf_subclass)?;
             }
             let h = handle.value() + 1;
             if h > max_h {
