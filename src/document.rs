@@ -652,6 +652,21 @@ pub struct HeaderVariables {
     pub paper_ucs_ortho_view: i16,
     /// PUCSBASE - name of the UCS the paper space orthographic origins are relative to
     pub paper_ucs_base: String,
+    // A DWG header holds the UCS entries above as handles and a DXF as names. The DWG reader
+    // fills both, the DXF reader the names, and the DWG writer takes a handle that names an entry
+    // of the UCS table, or else the entry the name gives.
+    /// UCSNAME - handle of the current model space UCS
+    pub model_space_ucs_handle: Handle,
+    /// PUCSNAME - handle of the current paper space UCS
+    pub paper_space_ucs_handle: Handle,
+    /// UCSBASE - handle of the UCS the model space orthographic origins are relative to
+    pub ucs_base_handle: Handle,
+    /// PUCSBASE - handle of the UCS the paper space orthographic origins are relative to
+    pub paper_ucs_base_handle: Handle,
+    /// UCSORTHOREF - name of the UCS the model space orthographic UCS is relative to
+    pub ucs_ortho_ref_name: String,
+    /// PUCSORTHOREF - name of the UCS the paper space orthographic UCS is relative to
+    pub paper_ucs_ortho_ref_name: String,
 
     // ==================== Handles/References ====================
     /// HANDSEED - Next available handle
@@ -1090,6 +1105,12 @@ impl Default for HeaderVariables {
             paper_ucs_ortho_ref: Handle::NULL,
             paper_ucs_ortho_view: 0,
             paper_ucs_base: String::new(),
+            model_space_ucs_handle: Handle::NULL,
+            paper_space_ucs_handle: Handle::NULL,
+            ucs_base_handle: Handle::NULL,
+            paper_ucs_base_handle: Handle::NULL,
+            ucs_ortho_ref_name: String::new(),
+            paper_ucs_ortho_ref_name: String::new(),
 
             // Handles
             handle_seed: 1,

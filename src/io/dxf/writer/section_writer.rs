@@ -957,6 +957,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             w.write_double(20, v.y)?;
             w.write_double(30, v.z)
         })?;
+        self.write_ucs_header_variables(hdr)?;
 
         self.writer.write_section_end()?;
         Ok(())
@@ -1135,6 +1136,71 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_header_variable("$MENU", |w| w.write_string(1, &hdr.menu_name))?;
         }
         self.write_header_object_pointers(hdr)
+    }
+
+    /// The UCS header variables the section above leaves out: the names of the current UCS and
+    /// of the UCS the orthographic settings are relative to (group 2), the orthographic view
+    /// type (70) and the six orthographic origins, for model space and for paper space.
+    fn write_ucs_header_variables(&mut self, hdr: &crate::document::HeaderVariables) -> Result<()> {
+        let version = self.dxf_version;
+        let spaces = [
+            (
+                "",
+                &hdr.ucs_base,
+                &hdr.model_space_ucs_name,
+                &hdr.ucs_ortho_ref_name,
+                hdr.ucs_ortho_view,
+                &hdr.ucs_ortho_origins,
+            ),
+            (
+                "P",
+                &hdr.paper_ucs_base,
+                &hdr.paper_space_ucs_name,
+                &hdr.paper_ucs_ortho_ref_name,
+                hdr.paper_ucs_ortho_view,
+                &hdr.paper_ucs_ortho_origins,
+            ),
+        ];
+        for (prefix, base, name, ortho_ref, ortho_view, origins) in spaces {
+            if version >= DxfVersion::AC1015 {
+                self.write_header_variable(&format!("${prefix}UCSBASE"), |w| {
+                    w.write_string(2, base)
+                })?;
+            }
+            self.write_header_variable(&format!("${prefix}UCSNAME"), |w| w.write_string(2, name))?;
+            if prefix == "P" {
+                for (suffix, v) in [
+                    ("ORG", hdr.paper_space_ucs_origin),
+                    ("XDIR", hdr.paper_space_ucs_x_axis),
+                    ("YDIR", hdr.paper_space_ucs_y_axis),
+                ] {
+                    self.write_header_variable(&format!("$PUCS{suffix}"), |w| {
+                        w.write_double(10, v.x)?;
+                        w.write_double(20, v.y)?;
+                        w.write_double(30, v.z)
+                    })?;
+                }
+            }
+            if version >= DxfVersion::AC1015 {
+                self.write_header_variable(&format!("${prefix}UCSORTHOREF"), |w| {
+                    w.write_string(2, ortho_ref)
+                })?;
+                self.write_header_variable(&format!("${prefix}UCSORTHOVIEW"), |w| {
+                    w.write_i16(70, ortho_view)
+                })?;
+                for (suffix, v) in ["TOP", "BOTTOM", "LEFT", "RIGHT", "FRONT", "BACK"]
+                    .into_iter()
+                    .zip(origins)
+                {
+                    self.write_header_variable(&format!("${prefix}UCSORG{suffix}"), |w| {
+                        w.write_double(10, v.x)?;
+                        w.write_double(20, v.y)?;
+                        w.write_double(30, v.z)
+                    })?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Whether a header pointer names a record this file holds. A handle read from a DWG names

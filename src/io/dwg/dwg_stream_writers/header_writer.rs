@@ -550,14 +550,14 @@ fn write_header_fields(w: &mut SectionWriter, v: DxfVersion, h: &HeaderVariables
     w.write_3bit_double(h.paper_space_ucs_y_axis);
 
     // UCSNAME (PSPACE)
-    w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL);
+    w.write_handle_ref(DwgReferenceType::HardPointer, h.paper_space_ucs_handle);
 
     if r2000_plus(v) {
         // PUCSORTHOREF
         w.write_handle_ref(DwgReferenceType::HardPointer, h.paper_ucs_ortho_ref);
         w.write_bit_short(h.paper_ucs_ortho_view);
         // PUCSBASE
-        w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL);
+        w.write_handle_ref(DwgReferenceType::HardPointer, h.paper_ucs_base_handle);
 
         // Paper space orthographic origins (6 × 3BD) — default zeros
         for origin in &h.paper_ucs_ortho_origins {
@@ -577,14 +577,14 @@ fn write_header_fields(w: &mut SectionWriter, v: DxfVersion, h: &HeaderVariables
     w.write_3bit_double(h.model_space_ucs_y_axis);
 
     // UCSNAME (MSPACE)
-    w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL);
+    w.write_handle_ref(DwgReferenceType::HardPointer, h.model_space_ucs_handle);
 
     if r2000_plus(v) {
         // UCSORTHOREF
         w.write_handle_ref(DwgReferenceType::HardPointer, h.ucs_ortho_ref);
         w.write_bit_short(h.ucs_ortho_view);
         // UCSBASE
-        w.write_handle_ref(DwgReferenceType::HardPointer, Handle::NULL);
+        w.write_handle_ref(DwgReferenceType::HardPointer, h.ucs_base_handle);
 
         // Model space orthographic origins (6 × 3BD) — default zeros
         for origin in &h.ucs_ortho_origins {

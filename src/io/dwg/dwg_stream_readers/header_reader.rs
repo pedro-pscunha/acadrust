@@ -509,12 +509,12 @@ fn read_header_fields(r: &mut SectionReader, v: DxfVersion, h: &mut HeaderVariab
     h.paper_space_ucs_y_axis = r.read_3bit_double();
 
     // UCSNAME (PSPACE)
-    let _ = r.read_handle();
+    h.paper_space_ucs_handle = Handle::new(r.read_handle());
 
     if r2000_plus(v) {
         h.paper_ucs_ortho_ref = Handle::new(r.read_handle());
         h.paper_ucs_ortho_view = r.read_bit_short();
-        let _ = r.read_handle(); // PUCSBASE
+        h.paper_ucs_base_handle = Handle::new(r.read_handle()); // PUCSBASE
 
         // Paper space orthographic origins (6 × 3BD)
         for origin in h.paper_ucs_ortho_origins.iter_mut() {
@@ -534,12 +534,12 @@ fn read_header_fields(r: &mut SectionReader, v: DxfVersion, h: &mut HeaderVariab
     h.model_space_ucs_y_axis = r.read_3bit_double();
 
     // UCSNAME (MSPACE)
-    let _ = r.read_handle();
+    h.model_space_ucs_handle = Handle::new(r.read_handle());
 
     if r2000_plus(v) {
         h.ucs_ortho_ref = Handle::new(r.read_handle());
         h.ucs_ortho_view = r.read_bit_short();
-        let _ = r.read_handle(); // UCSBASE
+        h.ucs_base_handle = Handle::new(r.read_handle()); // UCSBASE
 
         // Model space orthographic origins (6 × 3BD)
         for origin in h.ucs_ortho_origins.iter_mut() {

@@ -3601,6 +3601,40 @@ impl DwgDocumentBuilder {
             }
         }
 
+        // The current UCS and the UCS the orthographic settings are relative to are handles in
+        // the DWG header, and the DXF reader gives their names.
+        {
+            let ucs_name = |handle: Handle| {
+                document
+                    .ucss
+                    .iter()
+                    .find(|u| !handle.is_null() && u.handle == handle)
+                    .map(|u| u.name.clone())
+            };
+            let h = &document.header;
+            let names = [
+                ucs_name(h.model_space_ucs_handle),
+                ucs_name(h.ucs_base_handle),
+                ucs_name(h.ucs_ortho_ref),
+                ucs_name(h.paper_space_ucs_handle),
+                ucs_name(h.paper_ucs_base_handle),
+                ucs_name(h.paper_ucs_ortho_ref),
+            ];
+            let h = &mut document.header;
+            for (name, slot) in names.into_iter().zip([
+                &mut h.model_space_ucs_name,
+                &mut h.ucs_base,
+                &mut h.ucs_ortho_ref_name,
+                &mut h.paper_space_ucs_name,
+                &mut h.paper_ucs_base,
+                &mut h.paper_ucs_ortho_ref_name,
+            ]) {
+                if let Some(name) = name {
+                    *slot = name;
+                }
+            }
+        }
+
         // ── Post-pass: guarantee the mandatory *Model_Space / *Paper_Space ──
         // block records exist and enumerate their geometry.
         //

@@ -3473,6 +3473,16 @@ impl<'a> SectionReader<'a> {
                         hdr.paper_ucs_base = p.value_string.clone();
                     }
                 }
+                "$UCSORTHOREF" => {
+                    if let Some(p) = self.reader.read_pair()? {
+                        hdr.ucs_ortho_ref_name = p.value_string.clone();
+                    }
+                }
+                "$PUCSORTHOREF" => {
+                    if let Some(p) = self.reader.read_pair()? {
+                        hdr.paper_ucs_ortho_ref_name = p.value_string.clone();
+                    }
+                }
                 "$DIMTXTDIRECTION" => {
                     if let Some(p) = self.reader.read_pair()? {
                         if let Some(v) = p.as_i16() {

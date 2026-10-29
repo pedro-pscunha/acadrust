@@ -1622,17 +1622,30 @@ fn prepare_header(
         }
     }
 
-    // UCS ortho ref handles — validate against UCS table
+    // UCS handles. A DWG header holds the current UCS and the UCS the orthographic settings are
+    // relative to as handles, and a DXF as names. Keep a handle that names an entry of the UCS
+    // table, else take the entry the name gives, else write null.
     {
-        let ucs_valid = |handle: Handle| -> bool {
-            handle.is_null() || document.ucss.iter().any(|u| u.handle == handle)
+        let ucs_entry = |handle: Handle, name: &str| -> Handle {
+            document
+                .ucss
+                .iter()
+                .find(|u| !handle.is_null() && u.handle == handle)
+                .or_else(|| {
+                    if name.is_empty() {
+                        None
+                    } else {
+                        document.ucss.get(name)
+                    }
+                })
+                .map_or(Handle::NULL, |u| u.handle)
         };
-        if !ucs_valid(h.paper_ucs_ortho_ref) {
-            h.paper_ucs_ortho_ref = Handle::NULL;
-        }
-        if !ucs_valid(h.ucs_ortho_ref) {
-            h.ucs_ortho_ref = Handle::NULL;
-        }
+        h.model_space_ucs_handle = ucs_entry(h.model_space_ucs_handle, &h.model_space_ucs_name);
+        h.ucs_base_handle = ucs_entry(h.ucs_base_handle, &h.ucs_base);
+        h.ucs_ortho_ref = ucs_entry(h.ucs_ortho_ref, &h.ucs_ortho_ref_name);
+        h.paper_space_ucs_handle = ucs_entry(h.paper_space_ucs_handle, &h.paper_space_ucs_name);
+        h.paper_ucs_base_handle = ucs_entry(h.paper_ucs_base_handle, &h.paper_ucs_base);
+        h.paper_ucs_ortho_ref = ucs_entry(h.paper_ucs_ortho_ref, &h.paper_ucs_ortho_ref_name);
     }
 
     // ── Resolve and validate dim linetype handles against actual linetypes ──
