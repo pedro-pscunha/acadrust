@@ -4768,10 +4768,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_subclass("AcDbVertex")?;
             self.writer.write_subclass("AcDb2dVertex")?;
             self.writer.write_point3d(10, vertex.location)?;
-            if vertex.start_width != 0.0 {
+            // A vertex without the group inherits the default width of the polyline, so a zero
+            // width under a non-zero default is written.
+            if vertex.start_width != 0.0 || polyline.start_width != 0.0 {
                 self.writer.write_double(40, vertex.start_width)?;
             }
-            if vertex.end_width != 0.0 {
+            if vertex.end_width != 0.0 || polyline.end_width != 0.0 {
                 self.writer.write_double(41, vertex.end_width)?;
             }
             if vertex.bulge != 0.0 {

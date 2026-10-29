@@ -13430,13 +13430,15 @@ impl<'a> SectionReader<'a> {
                     v
                 })
                 .collect();
-            // When any vertex specifies its own width, the widths now live
-            // per-vertex; keeping a non-zero polyline default would let a
-            // renderer bleed it onto the intentionally zero-width segments.
-            let per_vertex_widths = geom_vertices
-                .iter()
-                .any(|rv| rv.has_start_width || rv.has_end_width);
-            if per_vertex_widths {
+            // The polyline keeps its default widths, as AutoCAD does in a DWG. Only a vertex that
+            // is explicitly zero wide under a non-zero default is a problem: a renderer that
+            // takes 0 as "use the default" would bleed it onto that segment, so such a polyline
+            // has its widths per vertex only.
+            let zero_wide_vertex_under_a_default = geom_vertices.iter().any(|rv| {
+                (rv.has_start_width && rv.start_width == 0.0 && def_start_width != 0.0)
+                    || (rv.has_end_width && rv.end_width == 0.0 && def_end_width != 0.0)
+            });
+            if zero_wide_vertex_under_a_default {
                 pl.start_width = 0.0;
                 pl.end_width = 0.0;
             } else {
