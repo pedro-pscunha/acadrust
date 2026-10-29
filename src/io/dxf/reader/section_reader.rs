@@ -21219,6 +21219,11 @@ impl<'a> SectionReader<'a> {
                         def.is_loaded = v != 0;
                     }
                 }
+                281 => {
+                    if let Some(v) = pair.as_i16() {
+                        def.resolution_unit = crate::objects::ResolutionUnit::from_code(v.into());
+                    }
+                }
                 _ => {}
             }
         }
