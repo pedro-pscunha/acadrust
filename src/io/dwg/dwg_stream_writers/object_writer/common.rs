@@ -1072,7 +1072,7 @@ impl<'a> DwgObjectWriter<'a> {
             xdata
                 .raw_dwg_eed
                 .iter()
-                .filter(|(app, _)| registered(*app))
+                .filter(|(app, bytes)| registered(*app) && !bytes.is_empty())
                 .cloned()
                 .collect()
         } else {
@@ -1091,6 +1091,9 @@ impl<'a> DwgObjectWriter<'a> {
             .filter_map(|rec| self.encode_xdata_record(rec))
             .filter(|(app, _)| !raw_blocks.iter().chain(extra).any(|(a, _)| a == app))
             .chain(extra.iter().cloned())
+            // A block of no bytes cannot be written: its size 0 is the list's terminator, and the
+            // application handle after it corrupts the record (a record with no values).
+            .filter(|(_, bytes)| !bytes.is_empty())
             .collect();
 
         if raw_blocks.is_empty() && record_blocks.is_empty() {
