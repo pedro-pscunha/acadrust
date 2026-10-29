@@ -1618,10 +1618,51 @@ enum MeshReadState {
 /// Section reader for parsing DXF sections
 pub struct SectionReader<'a> {
     reader: &'a mut Box<dyn DxfStreamReader>,
+    /// The reactors and extension dictionary the object being read named.
+    object_links: ObjectLinks,
     decoded_records: usize,
     failsafe: bool,
     skipped_records: usize,
     recovery_errors: Vec<SectionRecoveryError>,
+}
+
+/// The `102 {ACAD_REACTORS` and `102 {ACAD_XDICTIONARY` groups of an object whose record has no
+/// field for them (a mleader style, a table style, a scale): kept beside the document, as a DWG
+/// read keeps them.
+#[derive(Default)]
+struct ObjectLinks {
+    group: String,
+    reactors: Vec<Handle>,
+    xdictionary: Option<Handle>,
+}
+
+impl ObjectLinks {
+    /// Whether `pair` belongs to a 102 group (and was taken).
+    fn take(&mut self, pair: &super::stream_reader::DxfCodePair) -> bool {
+        match pair.code {
+            102 => {
+                self.group = pair
+                    .value_string
+                    .trim()
+                    .strip_prefix('{')
+                    .unwrap_or("")
+                    .to_string();
+                true
+            }
+            330 | 360 if !self.group.is_empty() => {
+                let handle = u64::from_str_radix(pair.value_string.trim(), 16)
+                    .ok()
+                    .map(Handle::new);
+                match (self.group.as_str(), pair.code) {
+                    ("ACAD_REACTORS", 330) => self.reactors.extend(handle),
+                    ("ACAD_XDICTIONARY", 360) => self.xdictionary = handle,
+                    _ => {}
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// A record-level error recovered by a section reader.
@@ -1636,6 +1677,7 @@ impl<'a> SectionReader<'a> {
     pub fn new(reader: &'a mut Box<dyn DxfStreamReader>) -> Self {
         Self {
             reader,
+            object_links: ObjectLinks::default(),
             decoded_records: 0,
             failsafe: false,
             skipped_records: 0,
@@ -7051,6 +7093,7 @@ impl<'a> SectionReader<'a> {
                         }
                         "MLEADERSTYLE" => {
                             if let Some(obj) = self.read_multileader_style()? {
+                                self.apply_object_links(document, obj.handle);
                                 document
                                     .objects
                                     .insert(obj.handle, ObjectType::MultiLeaderStyle(obj));
@@ -7065,6 +7108,7 @@ impl<'a> SectionReader<'a> {
                         }
                         "TABLESTYLE" => {
                             if let Some(obj) = self.read_table_style()? {
+                                self.apply_object_links(document, obj.handle);
                                 document
                                     .objects
                                     .insert(obj.handle, ObjectType::TableStyle(obj));
@@ -7079,6 +7123,7 @@ impl<'a> SectionReader<'a> {
                         }
                         "SCALE" => {
                             if let Some(obj) = self.read_scale()? {
+                                self.apply_object_links(document, obj.handle);
                                 document.objects.insert(obj.handle, ObjectType::Scale(obj));
                             }
                         }
@@ -21434,11 +21479,15 @@ impl<'a> SectionReader<'a> {
     /// Read an MLEADERSTYLE object
     fn read_multileader_style(&mut self) -> Result<Option<MultiLeaderStyle>> {
         let mut style = MultiLeaderStyle::new("Standard");
+        self.object_links = ObjectLinks::default();
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
                 self.reader.push_back(pair);
                 break;
+            }
+            if self.object_links.take(&pair) {
+                continue;
             }
             match pair.code {
                 5 => {
@@ -21770,6 +21819,7 @@ impl<'a> SectionReader<'a> {
         let mut raw_dxf_codes = Vec::new();
         let mut rows = Vec::<RowCellStyle>::with_capacity(3);
         let mut saw_name = false;
+        self.object_links = ObjectLinks::default();
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -21777,6 +21827,9 @@ impl<'a> SectionReader<'a> {
                 break;
             }
             raw_dxf_codes.push((pair.code, pair.value_string.clone()));
+            if self.object_links.take(&pair) {
+                continue;
+            }
             match pair.code {
                 5 => {
                     if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
@@ -21930,11 +21983,15 @@ impl<'a> SectionReader<'a> {
     /// Read a SCALE object
     fn read_scale(&mut self) -> Result<Option<Scale>> {
         let mut scale = Scale::new("1:1", 1.0, 1.0);
+        self.object_links = ObjectLinks::default();
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
                 self.reader.push_back(pair);
                 break;
+            }
+            if self.object_links.take(&pair) {
+                continue;
             }
             match pair.code {
                 5 => {
@@ -21970,6 +22027,20 @@ impl<'a> SectionReader<'a> {
         Ok(Some(scale))
     }
 
+    /// Keep the reactors and extension dictionary the object just read named.
+    fn apply_object_links(&mut self, document: &mut CadDocument, handle: Handle) {
+        let links = std::mem::take(&mut self.object_links);
+        if handle.is_null() {
+            return;
+        }
+        if !links.reactors.is_empty() {
+            document.reactors_by_handle.insert(handle, links.reactors);
+        }
+        if let Some(xdictionary) = links.xdictionary {
+            document.xdic_by_handle.insert(handle, xdictionary);
+        }
+    }
+
     fn read_object_xdata(&mut self, document: &mut CadDocument) -> Result<()> {
         let (handle, pairs) = self.reader.take_recorded_xdata();
         self.reader.record_xdata(false);
@@ -21979,11 +22050,15 @@ impl<'a> SectionReader<'a> {
         else {
             return Ok(());
         };
+        // A table style keeps its XDATA in its own groups; the applications other than the
+        // annotative flag it holds as a field are kept aside as well, for the DWG writer.
+        let table_style = matches!(document.objects.get(&handle), Some(ObjectType::TableStyle(_)));
         if pairs.is_empty()
-            || document
-                .objects
-                .get(&handle)
-                .is_some_and(crate::io::dxf::object_has_own_dxf_xdata)
+            || (!table_style
+                && document
+                    .objects
+                    .get(&handle)
+                    .is_some_and(crate::io::dxf::object_has_own_dxf_xdata))
         {
             return Ok(());
         }
@@ -21992,9 +22067,12 @@ impl<'a> SectionReader<'a> {
         for pair in pairs.into_iter().rev() {
             self.reader.push_back(pair);
         }
-        let (xdata, next) = self.read_extended_data()?;
+        let (mut xdata, next) = self.read_extended_data()?;
         if let Some(next) = next {
             self.reader.push_back(next);
+        }
+        if table_style {
+            xdata.remove_record("AcadAnnotative");
         }
         if !xdata.is_empty() {
             document.object_xdata.insert(handle, xdata);

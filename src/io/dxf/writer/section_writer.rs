@@ -6428,10 +6428,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 }
                 ObjectType::UnderlayDefinition(def) => self.write_underlay_definition(def)?,
                 ObjectType::PlotSettings(plotsettings) => self.write_plot_settings(plotsettings)?,
-                ObjectType::MultiLeaderStyle(style) => self.write_multileader_style(style)?,
-                ObjectType::TableStyle(style) => self.write_table_style(style)?,
+                ObjectType::MultiLeaderStyle(style) => {
+                    self.write_multileader_style(style, document)?
+                }
+                ObjectType::TableStyle(style) => self.write_table_style(style, document)?,
                 ObjectType::TableContent(table) => self.write_table_content_object_dxf(table)?,
-                ObjectType::Scale(scale) => self.write_scale(scale)?,
+                ObjectType::Scale(scale) => self.write_scale(scale, document)?,
                 ObjectType::ObjectContextData(ctx) => self.write_object_context_data(ctx)?,
                 ObjectType::SortEntitiesTable(table) => self.write_sort_entities_table(table)?,
                 ObjectType::DictionaryVariable(var) => self.write_dictionary_variable(var)?,
@@ -8484,9 +8486,14 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     /// Write MultiLeaderStyle object
-    fn write_multileader_style(&mut self, style: &MultiLeaderStyle) -> Result<()> {
+    fn write_multileader_style(
+        &mut self,
+        style: &MultiLeaderStyle,
+        document: &CadDocument,
+    ) -> Result<()> {
         self.writer.write_string(0, "MLEADERSTYLE")?;
         self.writer.write_handle(5, style.handle)?;
+        self.write_object_links(document, style.handle)?;
         self.writer.write_handle(330, style.owner_handle)?;
         self.writer.write_subclass("AcDbMLeaderStyle")?;
 
@@ -8633,7 +8640,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     /// Write TableStyle object
-    fn write_table_style(&mut self, style: &TableStyle) -> Result<()> {
+    fn write_table_style(&mut self, style: &TableStyle, document: &CadDocument) -> Result<()> {
         self.writer.write_string(0, "TABLESTYLE")?;
         if let Some(raw_dxf_codes) = &style.raw_dxf_codes {
             let has_flags = raw_dxf_codes.iter().any(|(code, _)| *code == 71);
@@ -8676,6 +8683,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             return Ok(());
         }
         self.writer.write_handle(5, style.handle)?;
+        self.write_object_links(document, style.handle)?;
         self.writer.write_handle(330, style.owner_handle)?;
         self.writer.write_subclass("AcDbTableStyle")?;
 
@@ -8706,6 +8714,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.write_table_cell_style(&style.title_row_style)?;
         self.write_table_cell_style(&style.header_row_style)?;
         self.write_annotative_xdata(style.annotative)?;
+        // The other applications' XDATA (the annotative flag is the field above).
+        if let Some(xdata) = document.object_xdata.get(&style.handle) {
+            let mut others = xdata.clone();
+            others.remove_record("AcadAnnotative");
+            self.write_xdata(&others)?;
+        }
 
         Ok(())
     }
@@ -8750,10 +8764,33 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         Ok(())
     }
 
+    /// The reactors and extension dictionary of an object whose record has no field for them (a
+    /// DWG read keeps them beside the document), as the groups every object has.
+    fn write_object_links(&mut self, document: &CadDocument, handle: Handle) -> Result<()> {
+        let valid = |handle: &Handle| {
+            !handle.is_null()
+                && (self.valid_handles.is_empty() || self.valid_handles.contains(handle))
+        };
+        let reactors: Vec<Handle> = document
+            .reactors_by_handle
+            .get(&handle)
+            .map(|reactors| reactors.iter().copied().filter(valid).collect())
+            .unwrap_or_default();
+        let xdictionary = document.extension_dictionary_handle(handle).filter(valid);
+        self.write_reactor_group(reactors)?;
+        if let Some(xdictionary) = xdictionary {
+            self.writer.write_string(102, "{ACAD_XDICTIONARY")?;
+            self.writer.write_handle(360, xdictionary)?;
+            self.writer.write_string(102, "}")?;
+        }
+        Ok(())
+    }
+
     /// Write Scale object
-    fn write_scale(&mut self, scale: &Scale) -> Result<()> {
+    fn write_scale(&mut self, scale: &Scale, document: &CadDocument) -> Result<()> {
         self.writer.write_string(0, "SCALE")?;
         self.writer.write_handle(5, scale.handle)?;
+        self.write_object_links(document, scale.handle)?;
         self.writer.write_handle(330, scale.owner_handle)?;
         self.writer.write_subclass("AcDbScale")?;
 
