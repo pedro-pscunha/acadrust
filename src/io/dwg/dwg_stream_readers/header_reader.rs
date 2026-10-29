@@ -710,6 +710,17 @@ fn read_header_fields(r: &mut SectionReader, v: DxfVersion, h: &mut HeaderVariab
         h.dim_linetype_handle = Handle::new(r.read_handle());
         h.dim_linetype1_handle = Handle::new(r.read_handle());
         h.dim_linetype2_handle = Handle::new(r.read_handle());
+        // A null handle is no linetype: AutoCAD writes null and shows an empty name, and the
+        // DXF header names the linetype of a non-null handle only.
+        for (handle, name) in [
+            (h.dim_linetype_handle, &mut h.dim_linetype_name),
+            (h.dim_linetype1_handle, &mut h.dim_linetype1_name),
+            (h.dim_linetype2_handle, &mut h.dim_linetype2_name),
+        ] {
+            if handle.is_null() {
+                name.clear();
+            }
+        }
     }
 
     // R2000+ dimension line weights
