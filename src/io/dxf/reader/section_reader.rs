@@ -18031,6 +18031,7 @@ impl<'a> SectionReader<'a> {
         let mut attrib = AttributeEntity::new(String::new(), String::new());
         let mut insertion_point = PointReader::new();
         let mut alignment_point = PointReader::new();
+        let mut normal = PointReader::new();
         // Code 280 ahead of the tag is the R2010+ version byte; after the tag
         // it is the lock-position flag (R2007 files carry only the latter).
         let mut seen_tag = false;
@@ -18051,6 +18052,10 @@ impl<'a> SectionReader<'a> {
                     }
                 }
                 8 => attrib.common.layer = pair.value_string.clone(),
+                // The extrusion direction is a field of the AcDbText part, before AcDbAttribute.
+                210 | 220 | 230 if !in_attribute_subclass => {
+                    normal.add_coordinate(&pair);
+                }
                 62 => {
                     if let Some(v) = pair.as_i16() {
                         attrib.common.color = Color::from_index(v);
@@ -18163,6 +18168,9 @@ impl<'a> SectionReader<'a> {
 
         attrib.insertion_point = insertion_point.get_point().unwrap_or(Vector3::zero());
         attrib.alignment_point = alignment_point.get_point().unwrap_or(Vector3::zero());
+        if let Some(normal) = normal.get_point() {
+            attrib.normal = normal;
+        }
         attrib.line_count = attrib.value.matches("\\P").count() as i16 + 1;
 
         Ok(Some(attrib))
