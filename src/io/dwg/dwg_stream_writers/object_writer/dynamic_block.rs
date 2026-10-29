@@ -562,7 +562,10 @@ impl<'a> DwgObjectWriter<'a> {
             }
             DynamicBlockData::PropertiesTable(value) => {
                 self.write_dynamic_one_point(&value.parameter);
+                let mut previous_code = 0;
                 for field in &value.fields {
+                    let after_column_metadata = previous_code == 302;
+                    previous_code = field.code;
                     match &field.value {
                         BlockPropertiesTableValue::Text(value) => {
                             self.writer.write_variable_text(value);
@@ -579,9 +582,17 @@ impl<'a> DwgObjectWriter<'a> {
                         BlockPropertiesTableValue::Real(value) => {
                             self.writer.write_bit_double(*value);
                         }
-                        BlockPropertiesTableValue::Handle(value) => self
-                            .writer
-                            .write_handle(DwgReferenceType::HardPointer, value.value()),
+                        // The handle that closes a column (after its 302 text) is a hard owner,
+                        // null in a real drawing; the parameter reference that opens it, and the
+                        // handles of the cells, are hard pointers.
+                        BlockPropertiesTableValue::Handle(value) => {
+                            let kind = if after_column_metadata {
+                                DwgReferenceType::HardOwnership
+                            } else {
+                                DwgReferenceType::HardPointer
+                            };
+                            self.writer.write_handle(kind, value.value());
+                        }
                         BlockPropertiesTableValue::Binary(_) => {}
                     }
                 }
@@ -765,5 +776,111 @@ mod ownership_tests {
         assert_eq!(reader.read_handle_reference(0x100, &mut kind), 0x50);
         assert_eq!(reader.read_handle_reference(0x100, &mut kind), 0x1234);
         assert_eq!(kind, DwgReferenceType::HardOwnership);
+    }
+}
+
+#[cfg(test)]
+mod properties_table_reference_tests {
+    use crate::document::CadDocument;
+    use crate::io::dwg::dwg_reference_type::DwgReferenceType;
+    use crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader;
+    use crate::io::dwg::dwg_stream_writers::DwgObjectWriter;
+    use crate::objects::{
+        BlockPropertiesTable, BlockPropertiesTableField as Field,
+        BlockPropertiesTableValue as Value, DynamicBlockData, DynamicBlockObject, ObjectType,
+    };
+    use crate::types::{DxfVersion, Handle};
+
+    const PARAMETER: u64 = 0x7101;
+
+    /// The fields of a table of one column and no row, in the order of the DWG: the column stores
+    /// a reference to its parameter before its metadata (DXF 340) and a second handle after it
+    /// (DXF 340 after the 302), null in a real drawing.
+    fn fields() -> Vec<Field> {
+        let text = |code, value: &str| Field {
+            code,
+            value: Value::Text(value.into()),
+        };
+        let int = |code, value| Field {
+            code,
+            value: Value::Integer(value),
+        };
+        let flag = |code| Field {
+            code,
+            value: Value::Boolean(false),
+        };
+        let handle = |value| Field {
+            code: 340,
+            value: Value::Handle(Handle::new(value)),
+        };
+        let mut fields = vec![int(90, 0), text(300, "Table"), text(301, "")];
+        fields.push(int(91, 1));
+        fields.push(handle(PARAMETER));
+        fields.extend([int(170, 0), int(171, 0), text(300, "A"), text(301, "")]);
+        fields.extend([int(90, 0), int(170, 0), int(170, 0)]);
+        fields.extend((290..=294).map(flag));
+        fields.push(text(302, ""));
+        fields.push(handle(0));
+        fields.extend([int(92, 0), int(93, 0)]);
+        fields.extend((290..=292).map(flag));
+        fields
+    }
+
+    /// The reference types of the column's two handles. The record is written natively (an
+    /// unchanged DWG read would reuse the raw record).
+    fn stored_references(version: DxfVersion) -> [DwgReferenceType; 2] {
+        let mut document = CadDocument::with_version(version);
+        let handle = document.allocate_handle();
+        let mut object =
+            DynamicBlockObject::new("BLOCKPROPERTIESTABLE", "AcDbBlockPropertiesTable");
+        object.handle = handle;
+        object.owner = document.header.named_objects_dict_handle;
+        object.data = DynamicBlockData::PropertiesTable(BlockPropertiesTable {
+            parameter: Default::default(),
+            fields: fields(),
+        });
+        document
+            .objects
+            .insert(handle, ObjectType::DynamicBlock(object));
+        let (bytes, handles, _, _) = DwgObjectWriter::new(&document).unwrap().write();
+        let at = handles
+            .iter()
+            .find(|(h, _)| *h == handle.value())
+            .map(|(_, at)| i64::from(*at))
+            .expect("the object is written");
+        let reader = DwgObjectReader::new(
+            bytes,
+            version,
+            handles
+                .into_iter()
+                .map(|(h, at)| (h, i64::from(at)))
+                .collect(),
+        )
+        .unwrap();
+        let (type_code, mut merged) = reader.read_record_at(at as usize).unwrap();
+        reader.read_common_non_entity_data(&mut merged, type_code);
+        // The handles of the body: find the parameter reference and take the next one.
+        for _ in 0..16 {
+            let (value, kind) = merged.read_typed_handle();
+            if value == PARAMETER {
+                let (second, second_kind) = merged.read_typed_handle();
+                assert_eq!(second, 0, "the second handle is null");
+                return [kind, second_kind];
+            }
+        }
+        panic!("the parameter reference is not in the handle stream");
+    }
+
+    /// AutoCAD stores the parameter reference of a column as a hard pointer (5) and the handle
+    /// after it as a hard owner (3), also when it is null.
+    #[test]
+    fn a_column_keeps_a_hard_pointer_and_a_hard_owner() {
+        for version in [DxfVersion::AC1018, DxfVersion::AC1032] {
+            assert_eq!(
+                stored_references(version),
+                [DwgReferenceType::HardPointer, DwgReferenceType::HardOwnership],
+                "{version:?}"
+            );
+        }
     }
 }
