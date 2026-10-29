@@ -2226,7 +2226,7 @@ impl<'a> DwgObjectWriter<'a> {
         ));
         self.writer.write_variable_text(&def.file_name);
         self.writer.write_bit(def.is_loaded);
-        self.writer.write_byte(def.resolution_unit as u8);
+        self.writer.write_byte(def.resolution_unit.to_code() as u8);
         self.writer.write_2raw_double(crate::types::Vector2::new(
             def.pixel_size.0,
             def.pixel_size.1,

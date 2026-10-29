@@ -8,11 +8,13 @@ use crate::types::Handle;
 pub enum ResolutionUnit {
     /// No units specified
     #[default]
-    None = 0,
+    None,
     /// Centimeters
-    Centimeters = 2,
+    Centimeters,
     /// Inches
-    Inches = 5,
+    Inches,
+    /// Any other code a file stores (AutoCAD writes 3 for some images), kept as stored.
+    Other(u8),
 }
 
 impl ResolutionUnit {
@@ -21,13 +23,19 @@ impl ResolutionUnit {
         match code {
             2 => ResolutionUnit::Centimeters,
             5 => ResolutionUnit::Inches,
+            1..=255 => ResolutionUnit::Other(code as u8),
             _ => ResolutionUnit::None,
         }
     }
 
     /// Convert to DXF code value
     pub fn to_code(self) -> i32 {
-        self as i32
+        match self {
+            ResolutionUnit::None => 0,
+            ResolutionUnit::Centimeters => 2,
+            ResolutionUnit::Inches => 5,
+            ResolutionUnit::Other(code) => i32::from(code),
+        }
     }
 
     /// Check if units are specified
