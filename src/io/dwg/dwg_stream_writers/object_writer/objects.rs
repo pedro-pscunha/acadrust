@@ -1216,12 +1216,11 @@ impl<'a> DwgObjectWriter<'a> {
     }
 
     fn write_legacy_table_row_style(&mut self, value: &RowCellStyle) {
+        // The text style a DXF names is known by name only; a style the file does not hold is the
+        // Standard one, as in the modern cell styles.
         self.writer.write_handle(
             DwgReferenceType::HardPointer,
-            value
-                .text_style_handle
-                .map(|handle| handle.value())
-                .unwrap_or(0),
+            self.resolve_table_row_text_style(value).value(),
         );
         self.writer.write_bit_double(value.text_height);
         self.writer.write_bit_short(value.alignment as i16);

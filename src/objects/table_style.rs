@@ -738,8 +738,38 @@ fn legacy_rows_mut(style: &mut TableStyle) -> [&mut RowCellStyle; 3] {
     ]
 }
 
+/// Make the text style of each cell style of a table style known by its name and by its handle:
+/// a DXF names it (group 7) and a DWG points at it, so a style read from one has only half.
+fn resolve_row_text_styles(document: &mut crate::document::CadDocument) {
+    use crate::objects::ObjectType;
+    let styles: Vec<(String, Handle)> = document
+        .text_styles
+        .iter()
+        .map(|style| (style.name.clone(), style.handle))
+        .collect();
+    for object in document.objects.values_mut() {
+        let ObjectType::TableStyle(style) = object else {
+            continue;
+        };
+        for row in legacy_rows_mut(style) {
+            let by_handle = row
+                .text_style_handle
+                .and_then(|handle| styles.iter().find(|(_, h)| *h == handle));
+            if let Some((name, _)) = by_handle {
+                row.text_style_name = name.clone();
+            } else if let Some((_, handle)) = styles
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&row.text_style_name))
+            {
+                row.text_style_handle = Some(*handle).filter(|handle| !handle.is_null());
+            }
+        }
+    }
+}
+
 pub(crate) fn restore_table_style_roundtrip(document: &mut crate::document::CadDocument) {
     use crate::objects::{DataObjectData, ObjectType, XRecordValue};
+    resolve_row_text_styles(document);
     let styles: Vec<_> = document
         .objects
         .iter()
