@@ -10694,6 +10694,18 @@ impl<'a> SectionReader<'a> {
                         ds.dimtxtdirection = v != 0;
                     }
                 }
+                // True colors of DIMCLRD, DIMCLRE, DIMCLRT and DIMTFILLCLR: acadrust's own groups.
+                421..=424 => {
+                    if let Some(v) = pair.as_i32() {
+                        let color = Some(crate::types::Color::from_true_color_value(v));
+                        match pair.code {
+                            421 => ds.dimclrd_true_color = color,
+                            422 => ds.dimclre_true_color = color,
+                            423 => ds.dimclrt_true_color = color,
+                            _ => ds.dimtfillclr_true_color = color,
+                        }
+                    }
+                }
                 // R2010 zero suppression: acadrust's own groups (see the DXF writer).
                 51 => {
                     if let Some(v) = pair.as_double() {

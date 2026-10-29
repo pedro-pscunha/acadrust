@@ -1905,6 +1905,23 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             // The reader also takes 295, which older acadrust wrote.
             self.writer.write_bool(294, true)?;
         }
+        if self.dxf_version >= DxfVersion::AC1018 {
+            // True colors of the dimension, extension and text colors and the text fill color: a
+            // DWG of R2004 and later keeps them, AutoCAD's DXF DIMSTYLE record has only the ACI
+            // groups above. These codes are acadrust-private, packed 0xRRGGBB like group 420.
+            for (code, since, color) in [
+                (421, DxfVersion::AC1018, dimstyle.dimclrd_true_color),
+                (422, DxfVersion::AC1018, dimstyle.dimclre_true_color),
+                (423, DxfVersion::AC1018, dimstyle.dimclrt_true_color),
+                (424, DxfVersion::AC1021, dimstyle.dimtfillclr_true_color),
+            ] {
+                if let Some(value) = color.and_then(|c| c.to_true_color_value()) {
+                    if self.dxf_version >= since {
+                        self.writer.write_i32(code, value)?;
+                    }
+                }
+            }
+        }
         if self.dxf_version >= DxfVersion::AC1024 {
             // R2010 zero suppression. AutoCAD's DXF Reference has no DIMSTYLE group for these
             // (the DWG specification marks theirs "?"), so these four codes are acadrust-private:
