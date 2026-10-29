@@ -11837,6 +11837,21 @@ impl<'a> SectionReader<'a> {
             }
             // Entity visual-style override handles. DXF uses code 348 for
             // full, face and edge overrides in that order.
+            380 => {
+                if let Some(kind) = pair.as_i16() {
+                    common.plotstyle_flags = kind.clamp(0, 3) as u8;
+                }
+                Ok(true)
+            }
+            390 => {
+                if let Ok(h) = u64::from_str_radix(pair.value_string.trim(), 16) {
+                    common.plotstyle_handle = Some(Handle::new(h)).filter(|h| !h.is_null());
+                    if common.plotstyle_handle.is_some() && common.plotstyle_flags == 0 {
+                        common.plotstyle_flags = 3;
+                    }
+                }
+                Ok(true)
+            }
             348 => {
                 if let Ok(h) = u64::from_str_radix(pair.value_string.trim(), 16) {
                     let handle = Handle::new(h);

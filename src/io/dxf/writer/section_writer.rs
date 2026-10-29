@@ -4148,6 +4148,22 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_i16(60, 1)?;
         }
 
+        // Plot style (R2000+): the type (380: 1 by block, 2 default, 3 by object) and, for an
+        // object, its handle (390), which only a record the file keeps can be.
+        if self.dxf_version >= DxfVersion::AC1015 && common.plotstyle_flags != 0 {
+            let style = common.plotstyle_handle.filter(|handle| {
+                !handle.is_null()
+                    && (self.valid_handles.is_empty() || self.valid_handles.contains(handle))
+            });
+            if common.plotstyle_flags != 3 || style.is_some() {
+                self.writer
+                    .write_i16(380, i16::from(common.plotstyle_flags))?;
+            }
+            if let Some(style) = style {
+                self.writer.write_handle(390, style)?;
+            }
+        }
+
         // Transparency (code 440) — ByLayer is the implicit default.
         if self.dxf_version >= DxfVersion::AC1018 && !common.transparency.is_by_layer() {
             self.writer
