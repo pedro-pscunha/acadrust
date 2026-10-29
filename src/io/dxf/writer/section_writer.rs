@@ -739,6 +739,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
 
         if self.dxf_version >= DxfVersion::AC1024 {
+            self.write_header_variable("$DIMTXTDIRECTION", |w| {
+                w.write_i16(70, if hdr.dim_text_direction { 1 } else { 0 })
+            })?;
             self.write_header_variable("$DIMALTMZF", |w| w.write_double(40, hdr.dim_alt_mzf))?;
             self.write_header_variable("$DIMALTMZS", |w| w.write_string(6, &hdr.dim_alt_mzs))?;
             self.write_header_variable("$DIMMZF", |w| w.write_double(40, hdr.dim_mzf))?;
@@ -1776,10 +1779,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         self.writer.write_i16(70, flags)?;
 
-        // Postfix / suffix
-        if !dimstyle.dimpost.is_empty() && dimstyle.dimpost != "<>" {
-            self.writer.write_string(3, &dimstyle.dimpost)?;
-        }
+        // Postfix / suffix: an empty DIMPOST is not the reader's default "<>", so it is always written.
+        self.writer.write_string(3, &dimstyle.dimpost)?;
         if !dimstyle.dimapost.is_empty() {
             self.writer.write_string(4, &dimstyle.dimapost)?;
         }
@@ -1901,7 +1902,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_bool(290, true)?;
         }
         if self.dxf_version >= DxfVersion::AC1024 && dimstyle.dimtxtdirection {
-            self.writer.write_bool(295, true)?;
+            // The reader also takes 295, which older acadrust wrote.
+            self.writer.write_bool(294, true)?;
         }
         if self.dxf_version >= DxfVersion::AC1024 {
             // R2010 zero suppression. AutoCAD's DXF Reference has no DIMSTYLE group for these
