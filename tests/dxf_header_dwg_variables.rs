@@ -2,6 +2,11 @@
 //! HEADER section, so a drawing that went DWG, DXF, DWG came back with their defaults:
 //! the paper space extents, limits and insertion base, USERI1-5 and USERR1-5, ISOLINES, FACETRES,
 //! the geographic location, MENU and the rest listed below.
+//!
+//! A DWG header holds more variables than AutoCAD writes to a DXF HEADER. The DXF Reference and
+//! the HEADER of a DXF that AutoCAD 2018 saves have none of ISOLINES, FACETRES, TEXTQLTY,
+//! PELLIPSE, DIMMZF, DIMMZS, DIMALTMZF and DIMALTMZS, so only the DWG bridge writer
+//! (`DxfWriter::for_dwg_bridge`) writes them.
 
 use std::io::Cursor;
 
@@ -240,7 +245,10 @@ fn check_2007(doc: &CadDocument, what: &str) {
 }
 
 fn through_dxf(doc: &CadDocument) -> CadDocument {
-    let bytes = DxfWriter::new(doc).write_to_vec().expect("write dxf");
+    let bytes = DxfWriter::new(doc)
+        .for_dwg_bridge()
+        .write_to_vec()
+        .expect("write dxf");
     DxfReader::from_reader(Cursor::new(bytes))
         .expect("reader")
         .read()
@@ -285,7 +293,7 @@ fn binary_dxf_carries_them_too() {
     set_common(&mut doc);
     set_2004(&mut doc);
     set_2007(&mut doc);
-    let mut writer = DxfWriter::new(&doc);
+    let mut writer = DxfWriter::new(&doc).for_dwg_bridge();
     writer.binary = true;
     let back = DxfReader::from_reader(Cursor::new(
         writer.write_to_vec().expect("write binary dxf"),
@@ -296,4 +304,75 @@ fn binary_dxf_carries_them_too() {
     check_common(&back, "binary");
     check_2004(&back, "binary");
     check_2007(&back, "binary");
+}
+
+/// Variables of a DWG header that neither the DXF Reference nor an AutoCAD DXF has, with the first
+/// release that has each.
+const BRIDGE_ONLY: [(&str, DxfVersion); 8] = [
+    ("$ISOLINES", DxfVersion::AC1015),
+    ("$FACETRES", DxfVersion::AC1015),
+    ("$TEXTQLTY", DxfVersion::AC1015),
+    ("$PELLIPSE", DxfVersion::AC1015),
+    ("$DIMMZF", DxfVersion::AC1024),
+    ("$DIMMZS", DxfVersion::AC1024),
+    ("$DIMALTMZF", DxfVersion::AC1024),
+    ("$DIMALTMZS", DxfVersion::AC1024),
+];
+
+/// The names of the variables of the HEADER section.
+fn header_names(bytes: Vec<u8>) -> Vec<String> {
+    let text = String::from_utf8(bytes).expect("utf8");
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let end = lines
+        .windows(2)
+        .position(|w| w[0] == "0" && w[1] == "ENDSEC")
+        .expect("end of the HEADER");
+    lines[..end]
+        .windows(2)
+        .filter(|w| w[0] == "9")
+        .map(|w| w[1].to_string())
+        .collect()
+}
+
+#[test]
+fn the_default_dxf_header_has_only_variables_autocad_writes() {
+    for version in [
+        DxfVersion::AC1015,
+        DxfVersion::AC1021,
+        DxfVersion::AC1024,
+        DxfVersion::AC1032,
+    ] {
+        let mut doc = CadDocument::with_version(version);
+        set_common(&mut doc);
+        let names = header_names(DxfWriter::new(&doc).write_to_vec().expect("write dxf"));
+        for (name, _) in BRIDGE_ONLY {
+            assert!(!names.iter().any(|n| n == name), "{version:?}: {name}");
+        }
+    }
+}
+
+#[test]
+fn the_bridge_dxf_header_has_them() {
+    for version in [
+        DxfVersion::AC1015,
+        DxfVersion::AC1021,
+        DxfVersion::AC1024,
+        DxfVersion::AC1032,
+    ] {
+        let mut doc = CadDocument::with_version(version);
+        set_common(&mut doc);
+        let names = header_names(
+            DxfWriter::new(&doc)
+                .for_dwg_bridge()
+                .write_to_vec()
+                .expect("write dxf"),
+        );
+        for (name, since) in BRIDGE_ONLY {
+            assert_eq!(
+                names.iter().any(|n| n == name),
+                version >= since,
+                "{version:?}: {name}"
+            );
+        }
+    }
 }

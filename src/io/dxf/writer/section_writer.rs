@@ -812,10 +812,18 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_header_variable("$DIMTXTDIRECTION", |w| {
                 w.write_i16(70, if hdr.dim_text_direction { 1 } else { 0 })
             })?;
-            self.write_header_variable("$DIMALTMZF", |w| w.write_double(40, hdr.dim_alt_mzf))?;
-            self.write_header_variable("$DIMALTMZS", |w| w.write_string(6, &hdr.dim_alt_mzs))?;
-            self.write_header_variable("$DIMMZF", |w| w.write_double(40, hdr.dim_mzf))?;
-            self.write_header_variable("$DIMMZS", |w| w.write_string(6, &hdr.dim_mzs))?;
+            // Neither the DXF Reference nor the DXF of AutoCAD 2018 has the four zero
+            // suppression variables, so only a DWG bridge writes them.
+            if self.dwg_bridge {
+                self.write_header_variable("$DIMALTMZF", |w| {
+                    w.write_double(40, hdr.dim_alt_mzf)
+                })?;
+                self.write_header_variable("$DIMALTMZS", |w| {
+                    w.write_string(6, &hdr.dim_alt_mzs)
+                })?;
+                self.write_header_variable("$DIMMZF", |w| w.write_double(40, hdr.dim_mzf))?;
+                self.write_header_variable("$DIMMZS", |w| w.write_string(6, &hdr.dim_mzs))?;
+            }
         }
 
         self.write_dwg_header_variables(hdr)?;
@@ -1041,8 +1049,6 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             ("$USERI3", AC1015, hdr.user_int3),
             ("$USERI4", AC1015, hdr.user_int4),
             ("$USERI5", AC1015, hdr.user_int5),
-            ("$ISOLINES", AC1015, hdr.isolines),
-            ("$TEXTQLTY", AC1015, hdr.text_quality),
             ("$CMLJUST", AC1015, hdr.multiline_justification),
             ("$SHADEDGE", AC1015, hdr.shade_edge),
             ("$SHADEDIF", AC1015, hdr.shade_diffuse),
@@ -1063,7 +1069,6 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             ("$DIMASO", hdr.associate_dimensions),
             ("$DIMSHO", hdr.update_dimensions_while_dragging),
             ("$DIMUPT", hdr.dim_user_positioned_text),
-            ("$PELLIPSE", hdr.create_ellipse_as_polyline),
             ("$USRTIMER", hdr.user_timer),
         ] {
             self.write_header_variable(name, |w| w.write_i16(70, i16::from(v)))?;
@@ -1104,7 +1109,6 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             ("$USERR3", AC1015, hdr.user_real3),
             ("$USERR4", AC1015, hdr.user_real4),
             ("$USERR5", AC1015, hdr.user_real5),
-            ("$FACETRES", AC1015, hdr.facet_resolution),
             ("$CMLSCALE", AC1015, hdr.multiline_scale),
             ("$CHAMFERC", AC1015, hdr.chamfer_length),
             ("$CHAMFERD", AC1015, hdr.chamfer_angle),
@@ -1127,6 +1131,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             if version >= since {
                 self.write_header_variable(name, |w| w.write_double(40, v))?;
             }
+        }
+        // The DXF Reference and the DXF of AutoCAD 2018 have none of these four variables of a
+        // DWG header, so only a DWG bridge writes them.
+        if self.dwg_bridge && version >= AC1015 {
+            self.write_header_variable("$ISOLINES", |w| w.write_i16(70, hdr.isolines))?;
+            self.write_header_variable("$TEXTQLTY", |w| w.write_i16(70, hdr.text_quality))?;
+            self.write_header_variable("$PELLIPSE", |w| {
+                w.write_i16(70, i16::from(hdr.create_ellipse_as_polyline))
+            })?;
+            self.write_header_variable("$FACETRES", |w| w.write_double(40, hdr.facet_resolution))?;
         }
         if version >= AC1021 {
             let zone = i16::try_from(hdr.timezone).unwrap_or(0);
