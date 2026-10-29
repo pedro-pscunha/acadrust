@@ -373,6 +373,9 @@ impl DimStyle {
             dimaltd: 2,
             dimalttd: 2,
             dimtolj: 1,
+            // The default of a drawing AutoCAD saves; DXF has no group for them.
+            dimmzf: 100.0,
+            dimaltmzf: 100.0,
             ..Self::new(name)
         }
     }

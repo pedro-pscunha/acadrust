@@ -738,6 +738,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             })?;
         }
 
+        if self.dxf_version >= DxfVersion::AC1024 {
+            self.write_header_variable("$DIMALTMZF", |w| w.write_double(40, hdr.dim_alt_mzf))?;
+            self.write_header_variable("$DIMALTMZS", |w| w.write_string(6, &hdr.dim_alt_mzs))?;
+            self.write_header_variable("$DIMMZF", |w| w.write_double(40, hdr.dim_mzf))?;
+            self.write_header_variable("$DIMMZS", |w| w.write_string(6, &hdr.dim_mzs))?;
+        }
+
         // === Misc ===
         self.write_header_variable("$SPLFRAME", |w| {
             w.write_i16(70, if hdr.spline_frame { 1 } else { 0 })
@@ -1895,6 +1902,19 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         if self.dxf_version >= DxfVersion::AC1024 && dimstyle.dimtxtdirection {
             self.writer.write_bool(295, true)?;
+        }
+        if self.dxf_version >= DxfVersion::AC1024 {
+            // R2010 zero suppression. AutoCAD's DXF Reference has no DIMSTYLE group for these
+            // (the DWG specification marks theirs "?"), so these four codes are acadrust-private:
+            // AutoCAD does not define them and does not write them.
+            self.writer.write_double(51, dimstyle.dimmzf)?;
+            self.writer.write_double(52, dimstyle.dimaltmzf)?;
+            if !dimstyle.dimmzs.is_empty() {
+                self.writer.write_string(300, &dimstyle.dimmzs)?;
+            }
+            if !dimstyle.dimaltmzs.is_empty() {
+                self.writer.write_string(301, &dimstyle.dimaltmzs)?;
+            }
         }
 
         // Handle references

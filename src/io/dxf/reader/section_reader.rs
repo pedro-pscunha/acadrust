@@ -10694,6 +10694,19 @@ impl<'a> SectionReader<'a> {
                         ds.dimtxtdirection = v != 0;
                     }
                 }
+                // R2010 zero suppression: acadrust's own groups (see the DXF writer).
+                51 => {
+                    if let Some(v) = pair.as_double() {
+                        ds.dimmzf = v;
+                    }
+                }
+                52 => {
+                    if let Some(v) = pair.as_double() {
+                        ds.dimaltmzf = v;
+                    }
+                }
+                300 => ds.dimmzs = pair.value_string.clone(),
+                301 => ds.dimaltmzs = pair.value_string.clone(),
                 // Handle references
                 340 => {
                     if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
