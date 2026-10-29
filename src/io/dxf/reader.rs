@@ -723,6 +723,46 @@ impl DxfReader {
     }
 
     /// Skip the current section
+    /// Read the header, ENTITIES and OBJECTS sections of a small DXF into a document without
+    /// resolving references, so handles stay as the file names them and no default object is
+    /// kept. Used to reform single records ([`reform_object`]).
+    pub(crate) fn read_records_only(&mut self) -> Result<CadDocument> {
+        let mut document = CadDocument::new();
+        document.objects.clear();
+        let (mut decoded, mut skipped, mut diagnostics) = (0usize, 0usize, Vec::new());
+        while let Some(pair) = self.reader.read_pair()? {
+            if pair.code != 0 {
+                continue;
+            }
+            match pair.value_string.as_str() {
+                "EOF" => break,
+                "SECTION" => {
+                    let Some(name) = self.reader.read_pair()? else {
+                        break;
+                    };
+                    match name.value_string.as_str() {
+                        "HEADER" => self.read_header_section(&mut document)?,
+                        "ENTITIES" => self.read_entities_section(
+                            &mut document,
+                            &mut decoded,
+                            &mut skipped,
+                            &mut diagnostics,
+                        )?,
+                        "OBJECTS" => self.read_objects_section(
+                            &mut document,
+                            &mut decoded,
+                            &mut skipped,
+                            &mut diagnostics,
+                        )?,
+                        _ => self.skip_section()?,
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(document)
+    }
+
     fn skip_section(&mut self) -> Result<()> {
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 && pair.value_string == "ENDSEC" {

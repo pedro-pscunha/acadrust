@@ -8168,6 +8168,17 @@ impl<'a> SectionReader<'a> {
                             Color::from_true_color_value(pair.as_i32_bits().unwrap_or_default()),
                         ));
                     }
+                    // The true color of the color group (63 to 67) just read: 420 plus its
+                    // distance from 62.
+                    421..=427 => {
+                        if let Some(VisualStylePropertyValue::Color(color)) =
+                            pending_property.as_mut()
+                        {
+                            *color = Color::from_true_color_value(
+                                pair.as_i32_bits().unwrap_or_default(),
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }

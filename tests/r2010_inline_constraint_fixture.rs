@@ -62,5 +62,10 @@ fn synthetic_r2010_inline_group_loads_and_roundtrips_after_edit() {
     .read()
     .unwrap();
     assert_eq!(group(&dwg), &expected);
-    assert_eq!(group(&dxf), &expected);
+    // The DXF of R2010 is the form AutoCAD writes: its action has class version 1 (the DWG
+    // stores 2), and the rest of the group is the same.
+    let mut from_dxf = group(&dxf).clone();
+    assert_eq!(from_dxf.action.class_version, 1);
+    from_dxf.action.class_version = expected.action.class_version;
+    assert_eq!(from_dxf, expected);
 }

@@ -23,12 +23,14 @@ pub mod code_page;
 mod dxf_code;
 mod group_code_value;
 mod reader;
+mod reform;
 mod spline_flags;
 mod writer;
 
 pub use dxf_code::DxfCode;
 pub use group_code_value::GroupCodeValueType;
 pub use reader::{DxfReader, DxfReaderConfiguration};
+pub use reform::reform_object;
 pub(crate) use reader::{DxfStreamReader, DxfTextReader};
 pub use writer::{value_type_for_code, write_binary_dxf, write_dxf};
 pub use writer::{

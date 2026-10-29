@@ -93,15 +93,28 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         Ok(())
     }
 
+    /// Whether a constraint group is written in the inline layout of R2010 and older: the nodes
+    /// in the action record, each with its status before its connections, and no trailing real
+    /// in circle and arc nodes. A normal DXF has it below R2013, as AutoCAD writes it. The DXF
+    /// of a DWG bridge always has the registry layout (a host can declare another release than
+    /// the one the file was written for, and the reader tells the layouts apart by the groups).
+    fn inline_constraint_layout(&self) -> bool {
+        !self.dwg_bridge && self.dxf_version < crate::types::DxfVersion::AC1027
+    }
+
     fn write_constraint_common(&mut self, node: &AssocConstraintNode) -> Result<()> {
-        // One layout for every declared release: a host can rewrite the release of the file, and
-        // the reader tells the layouts apart by the groups.
+        let status_first = self.inline_constraint_layout();
         self.writer.write_i32(90, node.node_id)?;
+        if status_first {
+            self.writer.write_byte(70, node.status)?;
+        }
         self.writer.write_i32(90, node.connections.len() as i32)?;
         for connection in &node.connections {
             self.writer.write_i32(90, *connection)?;
         }
-        self.writer.write_byte(70, node.status)?;
+        if !status_first {
+            self.writer.write_byte(70, node.status)?;
+        }
         Ok(())
     }
 
@@ -291,7 +304,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(40, *radius)?;
                 self.writer.write_double(40, *start_parameter)?;
                 self.writer.write_double(40, *end_parameter)?;
-                self.writer.write_double(40, *reserved)?;
+                if !self.inline_constraint_layout() {
+                    self.writer.write_double(40, *reserved)?;
+                }
             }
             AssocConstraintNodeData::Arc {
                 geometry_dependency,
@@ -314,7 +329,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(40, *radius)?;
                 self.writer.write_double(40, *start_parameter)?;
                 self.writer.write_double(40, *end_parameter)?;
-                self.writer.write_double(40, *reserved)?;
+                if !self.inline_constraint_layout() {
+                    self.writer.write_double(40, *reserved)?;
+                }
                 self.writer.write_point3d(10, *start_point)?;
                 self.writer.write_point3d(11, *end_point)?;
             }
@@ -846,7 +863,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 }
             }
             AssociativeData::ConstraintGroup(value) => {
-                self.write_assoc_action(&value.action)?;
+                let inline = self.inline_constraint_layout();
+                if self.dwg_bridge {
+                    self.write_assoc_action(&value.action)?;
+                } else {
+                    // A normal DXF has the action of its layout: class version 1 below R2013
+                    // (no owned parameters or values), 2 from R2013.
+                    let mut action = value.action.clone();
+                    action.class_version = if inline { 1 } else { 2 };
+                    self.write_assoc_action(&action)?;
+                }
                 self.writer
                     .write_i32(90, if value.version == 0 { 2 } else { value.version })?;
                 self.writer.write_bool(70, value.flag)?;
@@ -865,6 +891,18 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     .filter(|node| !node.class_name.is_empty())
                     .collect();
                 self.writer.write_i32(90, value.effective_next_node_id())?;
+                if inline {
+                    // R2010 keeps nodes inline in AcDbAssocAction, with the group handle before
+                    // each common node header.
+                    self.writer.write_i32(90, registered.len() as i32)?;
+                    for node in registered {
+                        self.writer.write_string(1, &node.class_name)?;
+                        self.writer.write_handle(330, object.handle)?;
+                        self.write_constraint_common(node)?;
+                        self.write_constraint_data(&node.data)?;
+                    }
+                    return Ok(());
+                }
                 if let Some(root) = root {
                     self.writer.write_i32(90, root.node_id)?;
                     self.writer.write_i32(90, root.connections.len() as i32)?;

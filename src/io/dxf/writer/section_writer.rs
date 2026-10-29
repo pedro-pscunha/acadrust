@@ -2889,6 +2889,18 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         Ok(())
     }
 
+    /// Write the one entity (with its own owner handle) or the objects of a document built to
+    /// reform a single record (see `reform_object`). Nothing is filtered or renumbered.
+    pub(crate) fn write_single_record(&mut self, document: &CadDocument) -> Result<()> {
+        match document.entities.first() {
+            Some(entity) => {
+                let owner = entity.common().owner_handle;
+                self.write_entity_with_owner(entity, owner)
+            }
+            None => self.write_objects(document),
+        }
+    }
+
     /// Write an entity with explicit owner, followed by its XDATA.
     ///
     /// XDATA must sit at the end of the entity's own group codes, before any
@@ -9652,7 +9664,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if self.dxf_version >= DxfVersion::AC1027 {
             let mut properties = Self::visual_style_core_properties(obj);
             properties.extend(Self::visual_style_extended_properties(obj));
-            self.writer.write_i16(177, obj.extended_lighting_model)?;
+            self.writer
+                .write_i16(177, self.visual_style_lighting_model(obj.extended_lighting_model, true))?;
             self.writer.write_bool(291, obj.internal_use_only)?;
             self.writer
                 .write_i16(70, properties.len().min(i16::MAX as usize) as i16)?;
@@ -9661,7 +9674,8 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             }
         } else if self.dxf_version >= DxfVersion::AC1024 {
             let properties = Self::visual_style_core_properties(obj);
-            self.writer.write_i16(177, obj.extended_lighting_model)?;
+            self.writer
+                .write_i16(177, self.visual_style_lighting_model(obj.extended_lighting_model, false))?;
             self.writer.write_bool(291, obj.internal_use_only)?;
             let codes = [
                 71, 72, 73, 90, 40, 41, 63, 74, 91, 64, 65, 75, 175, 42, 92, 66, 43, 76, 77, 78,
@@ -9688,6 +9702,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writer.write_bool(291, obj.internal_use_only)?;
         }
         Ok(())
+    }
+
+    /// The extended lighting model (177) of a normal DXF: AutoCAD writes 2 in the short layout and
+    /// 3 in the long one for the same style. A DWG bridge keeps the model as it is.
+    fn visual_style_lighting_model(&self, model: i16, long_layout: bool) -> i16 {
+        match (self.dwg_bridge, long_layout, model) {
+            (false, true, 2) => 3,
+            (false, false, 3) => 2,
+            _ => model,
+        }
     }
 
     fn write_visual_style_dxf_property(
@@ -9728,7 +9752,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             VisualStylePropertyValue::Color(value) => {
                 self.writer.write_color(code.unwrap_or(62), value.clone())?;
                 if let Some(true_color) = value.to_true_color_value() {
-                    self.writer.write_i32(420, true_color)?;
+                    // The short and legacy layouts name the color by its own group (63 to 67)
+                    // and put its true color in the group 420 plus the distance from 62.
+                    let true_color_code = match code {
+                        Some(code @ 63..=67) => 420 + (code - 62),
+                        _ => 420,
+                    };
+                    self.writer.write_i32(true_color_code, true_color)?;
                 }
             }
             VisualStylePropertyValue::Text(value) => {

@@ -278,7 +278,7 @@ pub use layer_state::{LayerState, LayerStateLayer, LayerStateMask};
 
 // Re-export I/O types
 pub use io::dwg::{DwgOmission, DwgReadOptions, DwgReader, DwgWriter, MeshFaceBudget};
-pub use io::dxf::{DxfOmission, DxfReader, DxfReaderConfiguration, DxfWriter};
+pub use io::dxf::{reform_object, DxfOmission, DxfReader, DxfReaderConfiguration, DxfWriter};
 pub use io::read::{
     push_read_diagnostic, ReadDiagnostic, ReadOutcome, ReadStage, ReadStats, SourceFormat,
     MAX_READ_DIAGNOSTICS,
