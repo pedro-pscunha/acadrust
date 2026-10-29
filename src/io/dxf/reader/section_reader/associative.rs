@@ -297,12 +297,13 @@ fn read_dependency(record: &AssocDxfRecord) -> AssocDependency {
     }
 }
 
-fn read_constraint_common(
-    cursor: &mut AssocCursor<'_>,
-    dxf_version: crate::types::DxfVersion,
-) -> AssocConstraintNode {
+/// Reads a node header. The groups tell where the status is: a group 70 right after the node id
+/// is the status written before the connections (R2010 layout); the connection count (group 90)
+/// there means the status follows the connections. The declared DXF release never decides it,
+/// because a host can rewrite the release of the file.
+fn read_constraint_common(cursor: &mut AssocCursor<'_>) -> AssocConstraintNode {
     let node_id = cursor.i32(90);
-    let status_before = dxf_version < crate::types::DxfVersion::AC1027;
+    let status_before = cursor.peek_code() == Some(70);
     let mut status = if status_before {
         cursor.i32(70) as u8
     } else {
@@ -380,10 +381,19 @@ fn is_dxf_plain_geometrical_constraint(class_name: &str) -> bool {
     )
 }
 
+/// The trailing real of a circle or arc node (R2013 layout). A group 40 after the end parameter is
+/// that real; the declared DXF release never decides it.
+fn read_circle_reserved(cursor: &mut AssocCursor<'_>) -> f64 {
+    if cursor.peek_code() == Some(40) {
+        cursor.f64(40)
+    } else {
+        0.0
+    }
+}
+
 fn read_constraint_data(
     cursor: &mut AssocCursor<'_>,
     class_name: &str,
-    circle_reserved: bool,
 ) -> AssocConstraintNodeData {
     match class_name.to_ascii_uppercase().as_str() {
         "ACG2SMOOTHCONSTRAINT" => {
@@ -413,7 +423,7 @@ fn read_constraint_data(
             radius: cursor.f64(40),
             start_parameter: cursor.f64(40),
             end_parameter: cursor.f64(40),
-            reserved: if circle_reserved { cursor.f64(40) } else { 0.0 },
+            reserved: read_circle_reserved(cursor),
         },
         "ACCONSTRAINEDARC" => AssocConstraintNodeData::Arc {
             geometry_dependency: cursor.handle(330),
@@ -424,7 +434,7 @@ fn read_constraint_data(
             radius: cursor.f64(40),
             start_parameter: cursor.f64(40),
             end_parameter: cursor.f64(40),
-            reserved: if circle_reserved { cursor.f64(40) } else { 0.0 },
+            reserved: read_circle_reserved(cursor),
             start_point: cursor.point3(10),
             end_point: cursor.point3(11),
         },
@@ -1105,7 +1115,6 @@ impl<'a> SectionReader<'a> {
     pub(super) fn read_associative_object_dxf(
         &mut self,
         dxf_name: &str,
-        dxf_version: crate::types::DxfVersion,
     ) -> Result<AssociativeObject> {
         let mut record = AssocDxfRecord::default();
         let mut section = String::new();
@@ -1393,10 +1402,10 @@ impl<'a> SectionReader<'a> {
                 let next_node_id = cursor.i32(90);
                 let mut nodes = Vec::new();
                 // Native R2010 stores a count followed by class/owner/node
-                // records. Earlier codec output used the later registry
-                // layout even for R2010, so distinguish their actual fields.
-                let inline_nodes = dxf_version < crate::types::DxfVersion::AC1027
-                    && cursor.peek_code() == Some(90)
+                // records. The registry layout starts with the root node id and
+                // its connection count. The groups tell them apart, never the
+                // declared release.
+                let inline_nodes = cursor.peek_code() == Some(90)
                     && cursor
                         .entries
                         .get(cursor.position + 1)
@@ -1422,8 +1431,8 @@ impl<'a> SectionReader<'a> {
                             entries: &cursor.entries[cursor.position..end],
                             position: 0,
                         };
-                        let mut node = read_constraint_common(&mut node_cursor, dxf_version);
-                        node.data = read_constraint_data(&mut node_cursor, &class_name, false);
+                        let mut node = read_constraint_common(&mut node_cursor);
+                        node.data = read_constraint_data(&mut node_cursor, &class_name);
                         if matches!(node.data, AssocConstraintNodeData::None) {
                             return Err(crate::error::DxfError::NotImplemented(format!(
                                 "Unsupported DXF constraint node class {class_name}"
@@ -1444,12 +1453,12 @@ impl<'a> SectionReader<'a> {
                             registry.push((cursor.text(1), cursor.i32(90)));
                         }
                         for (class_name, registry_node_id) in registry {
-                            let mut node = read_constraint_common(&mut cursor, dxf_version);
+                            let mut node = read_constraint_common(&mut cursor);
                             if node.node_id == 0 {
                                 node.node_id = registry_node_id;
                             }
                             node.class_name = class_name;
-                            node.data = read_constraint_data(&mut cursor, &node.class_name, true);
+                            node.data = read_constraint_data(&mut cursor, &node.class_name);
                             if matches!(node.data, AssocConstraintNodeData::None) {
                                 return Err(crate::error::DxfError::NotImplemented(format!(
                                     "Unsupported DXF constraint node class {}",
@@ -1461,7 +1470,7 @@ impl<'a> SectionReader<'a> {
                     } else {
                         cursor.position = after_root;
                         for _ in 1..next_node_id.max(0).min(100_000) {
-                            nodes.push(read_constraint_common(&mut cursor, dxf_version));
+                            nodes.push(read_constraint_common(&mut cursor));
                         }
                     }
                 }

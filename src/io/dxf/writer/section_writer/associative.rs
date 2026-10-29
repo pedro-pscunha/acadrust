@@ -94,17 +94,14 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     fn write_constraint_common(&mut self, node: &AssocConstraintNode) -> Result<()> {
+        // One layout for every declared release: a host can rewrite the release of the file, and
+        // the reader tells the layouts apart by the groups.
         self.writer.write_i32(90, node.node_id)?;
-        if self.dxf_version < crate::types::DxfVersion::AC1027 {
-            self.writer.write_byte(70, node.status)?;
-        }
         self.writer.write_i32(90, node.connections.len() as i32)?;
         for connection in &node.connections {
             self.writer.write_i32(90, *connection)?;
         }
-        if self.dxf_version >= crate::types::DxfVersion::AC1027 {
-            self.writer.write_byte(70, node.status)?;
-        }
+        self.writer.write_byte(70, node.status)?;
         Ok(())
     }
 
@@ -294,9 +291,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(40, *radius)?;
                 self.writer.write_double(40, *start_parameter)?;
                 self.writer.write_double(40, *end_parameter)?;
-                if self.dxf_version >= crate::types::DxfVersion::AC1027 {
-                    self.writer.write_double(40, *reserved)?;
-                }
+                self.writer.write_double(40, *reserved)?;
             }
             AssocConstraintNodeData::Arc {
                 geometry_dependency,
@@ -319,9 +314,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(40, *radius)?;
                 self.writer.write_double(40, *start_parameter)?;
                 self.writer.write_double(40, *end_parameter)?;
-                if self.dxf_version >= crate::types::DxfVersion::AC1027 {
-                    self.writer.write_double(40, *reserved)?;
-                }
+                self.writer.write_double(40, *reserved)?;
                 self.writer.write_point3d(10, *start_point)?;
                 self.writer.write_point3d(11, *end_point)?;
             }
@@ -872,18 +865,6 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     .filter(|node| !node.class_name.is_empty())
                     .collect();
                 self.writer.write_i32(90, value.effective_next_node_id())?;
-                if self.dxf_version < crate::types::DxfVersion::AC1027 {
-                    // R2010 keeps nodes inline in AcDbAssocAction, with the
-                    // group handle before each common node header.
-                    self.writer.write_i32(90, registered.len() as i32)?;
-                    for node in registered {
-                        self.writer.write_string(1, &node.class_name)?;
-                        self.writer.write_handle(330, object.handle)?;
-                        self.write_constraint_common(node)?;
-                        self.write_constraint_data(&node.data)?;
-                    }
-                    return Ok(());
-                }
                 if let Some(root) = root {
                     self.writer.write_i32(90, root.node_id)?;
                     self.writer.write_i32(90, root.connections.len() as i32)?;
