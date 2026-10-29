@@ -460,12 +460,18 @@ pub fn read_vx_control(reader: &mut DwgMergedReader) -> VxControlData {
     }
 }
 
-/// Read VX_TABLE_RECORD / VPENT_HDR (R13-R2000).
-pub fn read_vx_table_record(reader: &mut DwgMergedReader) -> VxTableRecordData {
+/// Read VX_TABLE_RECORD / VPENT_HDR. Like every table record, it stores the 64 flag and the
+/// dependence bit only up to R2004; from R2007 it holds the xref index alone.
+pub fn read_vx_table_record(
+    reader: &mut DwgMergedReader,
+    version: DwgVersion,
+) -> VxTableRecordData {
     let name = reader.read_variable_text();
-    let is_xref_reference = reader.read_bit();
-    let is_xref_resolved = reader.read_bit_short() == 256;
-    let is_xref_dependent = reader.read_bit();
+    let XrefTableFlags {
+        reference: is_xref_reference,
+        resolved: is_xref_resolved,
+        dependent: is_xref_dependent,
+    } = read_xref_table_flags(reader, version);
     let is_on = reader.read_bit();
     let xref_handle = reader.read_handle();
     let viewport = reader.read_handle();
@@ -1596,6 +1602,58 @@ mod tests {
         // DwgMergedReader::new expects this position, not the count
         let hsb = writer.handle_start_bits();
         DwgMergedReader::new(data, dxf, hsb)
+    }
+
+    /// A VX table record of R2007 and later holds the xref index and the "on" bit and no 64 flag
+    /// or dependence bit; the R13-R2000 form holds all of them. AutoCAD writes the first form in
+    /// R2018 drawings (a Civil 3D drawing has four such records).
+    #[test]
+    fn test_vx_table_record_layouts() {
+        // The four VX table records of an AutoCAD R2018 drawing (Civil 3D), as the DWG stores them
+        // (type 71, data without the record framing) with the size of their handle stream in bits.
+        let object_reader =
+            crate::io::dwg::dwg_stream_readers::object_reader::DwgObjectReader::new(
+                vec![0; 16],
+                DxfVersion::AC1032,
+                std::collections::HashMap::new(),
+            )
+            .expect("object reader");
+        let records: [(&str, i64); 4] = [
+            ("11c1060d43a0aab0100601410143", 34),
+            ("11c1060d43a0eaa8098800d00704094110606535495060d43a13", 106),
+            ("11c1060d43a12ab01007040d4110608e32c95060d43a17", 106),
+            ("11c1060d43a16ab0100704114110608e391543", 74),
+        ];
+        for (hex, handle_bits) in records {
+            let bytes: Vec<u8> = (0..hex.len() / 2)
+                .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
+                .collect();
+            let (type_code, mut reader) = object_reader
+                .read_raw_record(&bytes, handle_bits)
+                .expect("record");
+            assert_eq!(type_code, 71);
+            object_reader.read_common_non_entity_data(&mut reader, type_code);
+            let record = read_vx_table_record(&mut reader, DwgVersion::AC24);
+            reader
+                .check_error()
+                .unwrap_or_else(|error| panic!("{hex}: {error}"));
+            assert!(!record.is_xref_reference, "{hex}: no 64 flag from R2007");
+        }
+
+        let mut reader = make_reader(DwgVersion::AC15, DxfVersion::AC1015, |w| {
+            w.write_variable_text("VX1");
+            w.write_bit(true); // 64 flag
+            w.write_bit_short(0); // xrefindex+1
+            w.write_bit(false); // dependent
+            w.write_bit(true); // on
+            w.write_handle(DwgReferenceType::HardPointer, 0);
+            w.write_handle(DwgReferenceType::SoftPointer, 0x50);
+            w.write_handle(DwgReferenceType::HardPointer, 0x40);
+        });
+        let record = read_vx_table_record(&mut reader, DwgVersion::AC15);
+        reader.check_error().expect("the R2000 form reads whole");
+        assert!(record.is_xref_reference && record.is_on);
+        assert_eq!((record.viewport, record.previous_entry), (0x50, 0x40));
     }
 
     #[test]
