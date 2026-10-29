@@ -353,6 +353,23 @@ struct Pass2Output {
 }
 
 impl Pass2Output {
+    /// How many things the records decoded so far gave: entities, objects and the side tables
+    /// a record can fill.
+    fn produced(&self) -> usize {
+        self.entities.len()
+            + self.entity_next_handles.len()
+            + self.objects.len()
+            + self.context_scales.len()
+            + self.block_visibility_params.len()
+            + self.block_representations.len()
+            + self.fields.len()
+            + self.dgn_ls_definitions.len()
+            + self.dgn_ls_components.len()
+            + self.view_rep_refs.len()
+            + self.section_view_reps.len()
+            + usize::from(self.section_view_style.is_some())
+    }
+
     fn new(
         version: crate::types::DxfVersion,
         model_space_block_handle: Handle,
@@ -450,7 +467,32 @@ struct RecordFailure {
     message: String,
 }
 
+/// Whether a record that decoded cleanly gave nothing (`produced` counts before and after).
+/// A SEQEND gives nothing of its own: its common data is merged into the polyline or insert it
+/// closes.
+fn record_was_silent(before: usize, after: usize, type_code: i16) -> bool {
+    before == after && type_code != OBJ_SEQEND
+}
+
 impl Pass2Chunk {
+    /// [`Pass2Output::produced`] plus the entities that wait for their parent.
+    fn produced(&self) -> usize {
+        self.output.produced()
+            + self.pending.polylines.len()
+            + self
+                .pending
+                .vertices
+                .values()
+                .map(|vertices| vertices.len())
+                .sum::<usize>()
+            + self.pending.seqends.len()
+            + self
+                .pending_attributes
+                .values()
+                .map(|attributes| attributes.len())
+                .sum::<usize>()
+    }
+
     fn new(
         version: crate::types::DxfVersion,
         model_space_block_handle: Handle,
@@ -1192,8 +1234,10 @@ impl DwgDocumentBuilder {
                             Some(ParsedEntry::VxControl(data.entry_handles))
                         }
                         OBJ_VPENT_HDR => {
-                            let data =
-                                tables::read_vx_table_record(&mut reader, self.obj_reader.version());
+                            let data = tables::read_vx_table_record(
+                                &mut reader,
+                                self.obj_reader.version(),
+                            );
                             Some(ParsedEntry::Vx(obj_handle, data))
                         }
                         _ => None,
@@ -2113,6 +2157,7 @@ impl DwgDocumentBuilder {
                         ));
                     }
                     let entity_start = chunk.output.entities.len();
+                    let produced_before = chunk.produced();
                     let section_style = chunk.output.section_view_style.clone();
                     let section_reps = chunk.output.section_view_reps.len();
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2130,6 +2175,23 @@ impl DwgDocumentBuilder {
                             photometric_lighting,
                         );
                     }));
+                    // A record that decoded without error but left nothing behind was dropped
+                    // without a word: report it like any other skipped record.
+                    if reader.check_error().is_ok()
+                        && result.is_ok()
+                        && record_was_silent(produced_before, chunk.produced(), type_code)
+                    {
+                        chunk.failures.push(RecordFailure {
+                            code: "record-produced-nothing",
+                            handle,
+                            offset,
+                            type_code,
+                            recoverable: false,
+                            message: format!(
+                                "Record at handle {handle:#X}, type_code={type_code} decoded but produced no entity or object"
+                            ),
+                        });
+                    }
                     if let Some(message) = reader
                         .check_error()
                         .err()
@@ -9164,5 +9226,19 @@ mod hatch_context_regression_tests {
         assert!(!elevated.evaluate);
         assert_eq!(elevated.main_remaining, 0);
         assert!(elevated.handle_remaining <= 7);
+    }
+}
+
+#[cfg(test)]
+mod silent_record_tests {
+    use super::*;
+
+    /// A record that decoded and left nothing behind is reported, except the SEQEND whose data is
+    /// merged into the entity it closes.
+    #[test]
+    fn a_record_that_produced_nothing_is_reported() {
+        assert!(record_was_silent(5, 5, OBJ_MTEXT));
+        assert!(!record_was_silent(5, 6, OBJ_MTEXT));
+        assert!(!record_was_silent(5, 5, OBJ_SEQEND));
     }
 }
