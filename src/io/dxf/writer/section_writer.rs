@@ -1135,6 +1135,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if !hdr.menu_name.is_empty() {
             self.write_header_variable("$MENU", |w| w.write_string(1, &hdr.menu_name))?;
         }
+        if version >= AC1015 && !hdr.stylesheet.is_empty() {
+            self.write_header_variable("$STYLESHEET", |w| w.write_string(7, &hdr.stylesheet))?;
+        }
         self.write_header_object_pointers(hdr)
     }
 
