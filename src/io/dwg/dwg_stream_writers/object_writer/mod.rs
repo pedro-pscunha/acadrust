@@ -191,6 +191,39 @@ impl<'a> DwgObjectWriter<'a> {
             if h > max_h {
                 max_h = h;
             }
+            // The VERTEX and SEQEND records of a polyline keep the handles they hold.
+            let children: Vec<Handle> = match entity {
+                EntityType::Polyline2D(polyline) => polyline
+                    .vertices
+                    .iter()
+                    .map(|v| v.handle)
+                    .chain(polyline.seqend.iter().map(|s| s.handle))
+                    .collect(),
+                EntityType::Polyline3D(polyline) => polyline
+                    .vertices
+                    .iter()
+                    .map(|v| v.handle)
+                    .chain(polyline.seqend.iter().map(|s| s.handle))
+                    .collect(),
+                EntityType::PolygonMesh(mesh) => mesh
+                    .vertices
+                    .iter()
+                    .map(|v| v.common.handle)
+                    .chain(mesh.seqend.iter().map(|s| s.handle))
+                    .collect(),
+                EntityType::PolyfaceMesh(mesh) => mesh
+                    .vertices
+                    .iter()
+                    .map(|v| v.common.handle)
+                    .chain(mesh.faces.iter().map(|f| f.common.handle))
+                    .chain(mesh.seqend.iter().map(|s| s.handle))
+                    .chain(mesh.seqend_handle)
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for child in children {
+                max_h = max_h.max(child.value() + 1);
+            }
         }
         for (handle, object) in &document.objects {
             if let ObjectType::ClassObject(ClassObject {

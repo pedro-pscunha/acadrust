@@ -189,7 +189,7 @@ fn read_hatch_scale_context_data(
 
 /// Pending vertex data collected during Pass 2, keyed by owner (parent polyline) handle.
 enum PendingVertex {
-    V2D(entities::Vertex2DData),
+    V2D(entities::Vertex2DData, EntityCommon),
     V3D(entities::Vertex3DData, EntityCommon),
     PfaceFace(entities::PfaceFaceData, EntityCommon),
 }
@@ -197,7 +197,7 @@ enum PendingVertex {
 impl PendingVertex {
     fn handle(&self) -> Handle {
         match self {
-            PendingVertex::V2D(data) => data.handle,
+            PendingVertex::V2D(data, _) => data.handle,
             PendingVertex::V3D(data, _) => data.handle,
             PendingVertex::PfaceFace(data, _) => data.handle,
         }
@@ -206,6 +206,23 @@ impl PendingVertex {
     fn handle_value(&self) -> u64 {
         self.handle().value()
     }
+}
+
+/// The layer (empty when it is the polyline's) and the other common data of a VERTEX read from a
+/// DWG, as the polyline entities keep them.
+fn polyline_child(
+    child: EntityCommon,
+    parent: &EntityCommon,
+) -> (String, Option<Box<EntityCommon>>) {
+    let layer = if child.layer == parent.layer {
+        String::new()
+    } else {
+        child.layer.clone()
+    };
+    (
+        layer,
+        crate::entities::polyline::child_extras(child, parent),
+    )
 }
 
 /// The child handles an R2004+ polyline lists, in drawing order. Records
@@ -300,6 +317,8 @@ struct PendingPolylines {
     vertices: HashMap<u64, Vec<PendingVertex>>,
     /// SEQEND handle keyed by owner (parent polyline) handle.
     seqends: HashMap<u64, crate::types::Handle>,
+    /// The common data of each SEQEND, keyed like `seqends`.
+    seqend_commons: HashMap<u64, EntityCommon>,
     /// Owned vertex handles, in list order, keyed by owner (parent polyline) handle.
     vertex_order: HashMap<u64, Vec<u64>>,
     /// Polyline entities awaiting vertex assembly, keyed by their handle.
@@ -2158,12 +2177,16 @@ impl DwgDocumentBuilder {
                         chunk.pending.polylines.retain(|(h, _)| *h != handle);
                         for vertices in chunk.pending.vertices.values_mut() {
                             vertices.retain(|vertex| match vertex {
-                                PendingVertex::V2D(data) => data.handle.value() != handle,
+                                PendingVertex::V2D(data, _) => data.handle.value() != handle,
                                 PendingVertex::V3D(data, _) => data.handle.value() != handle,
                                 PendingVertex::PfaceFace(data, _) => data.handle.value() != handle,
                             });
                         }
                         chunk.pending.seqends.retain(|_, h| h.value() != handle);
+                        chunk
+                            .pending
+                            .seqend_commons
+                            .retain(|_, common| common.handle.value() != handle);
                         for attributes in chunk.pending_attributes.values_mut() {
                             attributes
                                 .retain(|attribute| attribute.common.handle.value() != handle);
@@ -2316,6 +2339,9 @@ impl DwgDocumentBuilder {
                 }
                 pending.seqends.extend(chunk.pending.seqends.drain());
                 pending
+                    .seqend_commons
+                    .extend(chunk.pending.seqend_commons.drain());
+                pending
                     .vertex_order
                     .extend(chunk.pending.vertex_order.drain());
                 pending.polylines.append(&mut chunk.pending.polylines);
@@ -2385,7 +2411,8 @@ impl DwgDocumentBuilder {
                         e.vertices = verts
                             .into_iter()
                             .filter_map(|v| {
-                                if let PendingVertex::V2D(d) = v {
+                                if let PendingVertex::V2D(d, ec) = v {
+                                    let (layer, common) = polyline_child(ec, &e.common);
                                     Some(crate::entities::polyline::Vertex2D {
                                         location: crate::types::Vector3::new(d.x, d.y, d.z),
                                         flags: crate::entities::polyline::VertexFlags::from_bits(
@@ -2397,8 +2424,8 @@ impl DwgDocumentBuilder {
                                         curve_tangent: d.tangent_dir,
                                         id: d.vertex_id,
                                         handle: d.handle,
-                                        layer: String::new(),
-                                        common: None,
+                                        layer,
+                                        common,
                                     })
                                 } else {
                                     None
@@ -2410,13 +2437,14 @@ impl DwgDocumentBuilder {
                         e.vertices = verts
                             .into_iter()
                             .filter_map(|v| {
-                                if let PendingVertex::V3D(d, _ec) = v {
+                                if let PendingVertex::V3D(d, ec) = v {
+                                    let (layer, common) = polyline_child(ec, &e.common);
                                     Some(crate::entities::polyline3d::Vertex3DPolyline {
                                         handle: d.handle,
-                                        layer: String::new(),
+                                        layer,
                                         position: d.position,
                                         flags: d.flags as i32,
-                                        common: None,
+                                        common,
                                     })
                                 } else {
                                     None
@@ -2462,8 +2490,8 @@ impl DwgDocumentBuilder {
                         e.vertices = verts
                             .into_iter()
                             .filter_map(|v| {
-                                if let PendingVertex::V3D(d, _ec) = v {
-                                    let mut c = crate::entities::EntityCommon::new();
+                                if let PendingVertex::V3D(d, ec) = v {
+                                    let mut c = ec;
                                     c.handle = d.handle;
                                     Some(crate::entities::polygon_mesh::PolygonMeshVertex {
                                         common: c,
@@ -2476,6 +2504,17 @@ impl DwgDocumentBuilder {
                             })
                             .collect();
                     }
+                    _ => {}
+                }
+            }
+            // The SEQEND that ends the vertices keeps its handle and data.
+            if let Some(seqend) = pending.seqend_commons.get(&poly_handle) {
+                let seqend = Some(Box::new(seqend.clone()));
+                match &mut entity {
+                    EntityType::Polyline2D(ref mut e) => e.seqend = seqend,
+                    EntityType::Polyline3D(ref mut e) => e.seqend = seqend,
+                    EntityType::PolygonMesh(ref mut e) => e.seqend = seqend,
+                    EntityType::PolyfaceMesh(ref mut e) => e.seqend = seqend,
                     _ => {}
                 }
             }
@@ -3207,6 +3246,19 @@ impl DwgDocumentBuilder {
                         let xd = &mut std::sync::Arc::make_mut(entity).common_mut().extended_data;
                         for record in records {
                             xd.add_record(record);
+                        }
+                    }
+                    // The VERTEX and SEQEND records of a polyline hold their own EED.
+                    if crate::entities::polyline::child_commons(entity.as_ref())
+                        .iter()
+                        .any(|c| !c.extended_data.raw_dwg_eed.is_empty())
+                    {
+                        for child in crate::entities::polyline::child_commons_mut(
+                            std::sync::Arc::make_mut(entity),
+                        ) {
+                            for record in records_of(&child.extended_data) {
+                                child.extended_data.add_record(record);
+                            }
                         }
                     }
                     // ATTRIBs were attached to their INSERT before this pass, so they are
@@ -5184,6 +5236,9 @@ impl DwgDocumentBuilder {
                     pending
                         .seqends
                         .insert(entity_data.owner_handle, entity_common.handle);
+                    pending
+                        .seqend_commons
+                        .insert(entity_data.owner_handle, entity_common);
                 }
 
                 // ── Vertex child entities ──────────────────────────
@@ -5198,7 +5253,7 @@ impl DwgDocumentBuilder {
                         .vertices
                         .entry(entity_data.owner_handle)
                         .or_default()
-                        .push(PendingVertex::V2D(data));
+                        .push(PendingVertex::V2D(data, entity_common));
                 }
                 OBJ_VERTEX_3D | OBJ_VERTEX_MESH => {
                     let mut data = entities::read_vertex3d(&mut reader);

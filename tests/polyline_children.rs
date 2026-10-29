@@ -85,6 +85,10 @@ fn source(kind: Kind) -> String {
 0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nAPPID\n5\n9\n100\nAcDbSymbolTable\n70\n2\n\
 0\nAPPID\n5\n1C0\n100\nAcDbSymbolTableRecord\n100\nAcDbRegAppTableRecord\n2\nACAD\n70\n0\n\
 0\nAPPID\n5\n1C1\n100\nAcDbSymbolTableRecord\n100\nAcDbRegAppTableRecord\n2\nVENDOR\n70\n0\n\
+0\nENDTAB\n\
+0\nTABLE\n2\nLAYER\n5\n2\n100\nAcDbSymbolTable\n70\n2\n\
+0\nLAYER\n5\n1D0\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n2\nVertexLayer\n70\n0\n62\n7\n6\nContinuous\n\
+0\nLAYER\n5\n1D1\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n2\nSeqLayer\n70\n0\n62\n7\n6\nContinuous\n\
 0\nENDTAB\n0\nENDSEC\n\
 0\nSECTION\n2\nENTITIES\n\
 0\nPOLYLINE\n5\n{POLYLINE:X}\n100\nAcDbEntity\n8\n0\n{head}66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n70\n{flags}\n\
@@ -271,4 +275,39 @@ fn a_version_is_kept() {
     // The source is an R2018 drawing; the children do not depend on it.
     let doc = read(source(Kind::Polyline2D).into_bytes());
     assert_eq!(doc.version, DxfVersion::AC1032);
+}
+#[test]
+fn dxf_to_dwg_to_dxf_keeps_the_children() {
+    for kind in KINDS {
+        let doc = read(source(kind).into_bytes());
+        let dxf = DxfWriter::new(&doc)
+            .keep_heavy_polylines()
+            .for_dwg_bridge()
+            .write_to_vec()
+            .expect("write dxf");
+        let dwg = DwgWriter::write_to_vec(&read(dxf)).expect("write dwg");
+        let back = DwgReader::from_stream(Cursor::new(dwg))
+            .read()
+            .expect("read dwg");
+        assert_eq!(children(&back), wanted(kind), "{kind:?}: DWG");
+        let again = DxfWriter::new(&back)
+            .keep_heavy_polylines()
+            .for_dwg_bridge()
+            .write_to_vec()
+            .expect("write dxf");
+        assert_eq!(xrecord_links(&again), ["101", "190", "103"], "{kind:?}");
+        assert_eq!(children(&read(again)), wanted(kind), "{kind:?}: DXF");
+    }
+}
+
+#[test]
+fn a_plain_dxf_to_dwg_keeps_the_children() {
+    for kind in KINDS {
+        let doc = read(source(kind).into_bytes());
+        let dwg = DwgWriter::write_to_vec(&doc).expect("write dwg");
+        let back = DwgReader::from_stream(Cursor::new(dwg))
+            .read()
+            .expect("read dwg");
+        assert_eq!(children(&back), wanted(kind), "{kind:?}");
+    }
 }

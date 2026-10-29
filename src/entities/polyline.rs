@@ -189,6 +189,73 @@ pub(crate) fn child_extras(
     child_has_data(&child, parent).then(|| Box::new(child))
 }
 
+/// The common data held by the child records (VERTEX, face records, SEQEND) of a polyline entity
+/// of any kind: only the children that hold data of their own for a 2D and a 3D polyline.
+pub(crate) fn child_commons(entity: &super::EntityType) -> Vec<&EntityCommon> {
+    use super::EntityType;
+    match entity {
+        EntityType::Polyline2D(p) => p
+            .vertices
+            .iter()
+            .filter_map(|v| v.common.as_deref())
+            .chain(p.seqend.as_deref())
+            .collect(),
+        EntityType::Polyline3D(p) => p
+            .vertices
+            .iter()
+            .filter_map(|v| v.common.as_deref())
+            .chain(p.seqend.as_deref())
+            .collect(),
+        EntityType::PolygonMesh(m) => m
+            .vertices
+            .iter()
+            .map(|v| &v.common)
+            .chain(m.seqend.as_deref())
+            .collect(),
+        EntityType::PolyfaceMesh(m) => m
+            .vertices
+            .iter()
+            .map(|v| &v.common)
+            .chain(m.faces.iter().map(|f| &f.common))
+            .chain(m.seqend.as_deref())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// As [`child_commons`], mutable.
+pub(crate) fn child_commons_mut(entity: &mut super::EntityType) -> Vec<&mut EntityCommon> {
+    use super::EntityType;
+    match entity {
+        EntityType::Polyline2D(p) => p
+            .vertices
+            .iter_mut()
+            .filter_map(|v| v.common.as_deref_mut())
+            .chain(p.seqend.as_deref_mut())
+            .collect(),
+        EntityType::Polyline3D(p) => p
+            .vertices
+            .iter_mut()
+            .filter_map(|v| v.common.as_deref_mut())
+            .chain(p.seqend.as_deref_mut())
+            .collect(),
+        EntityType::PolygonMesh(m) => m
+            .vertices
+            .iter_mut()
+            .map(|v| &mut v.common)
+            .chain(m.seqend.as_deref_mut())
+            .collect(),
+        EntityType::PolyfaceMesh(m) => m
+            .vertices
+            .iter_mut()
+            .map(|v| &mut v.common)
+            .chain(m.faces.iter_mut().map(|f| &mut f.common))
+            .chain(m.seqend.as_deref_mut())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// A vertex in a 2D polyline
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
