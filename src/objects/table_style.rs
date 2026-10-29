@@ -247,6 +247,11 @@ pub struct TableCellBorder {
 
     /// Spacing for double line borders.
     pub double_line_spacing: f64,
+
+    /// Linetype of the border (hard pointer). Null means by block: a DWG writer
+    /// points it at the ByBlock linetype. DXF holds no linetype for a legacy
+    /// row border.
+    pub line_type: Handle,
 }
 
 impl TableCellBorder {
@@ -259,6 +264,7 @@ impl TableCellBorder {
             color: Color::ByBlock,
             is_invisible: false,
             double_line_spacing: 0.0,
+            line_type: Handle::NULL,
         }
     }
 

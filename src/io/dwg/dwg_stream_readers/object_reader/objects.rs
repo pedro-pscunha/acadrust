@@ -422,6 +422,7 @@ pub(super) fn read_table_cell_style_data(reader: &mut DwgMergedReader) -> TableC
                 color,
                 is_invisible: visible == 0,
                 double_line_spacing,
+                line_type: Handle::NULL,
             },
             line_type: Handle::from(line_type),
         });
@@ -517,6 +518,7 @@ fn apply_cell_style_to_row(
     for grid in &style.borders {
         let mut border = grid.border.clone();
         border.is_invisible = !border.is_invisible;
+        border.line_type = grid.line_type;
         match grid.index_mask {
             1 => row.top_border = border,
             2 => row.horizontal_inside_border = border,

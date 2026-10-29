@@ -1392,7 +1392,13 @@ impl<'a> DwgObjectWriter<'a> {
         merge_flags: i32,
     ) {
         // R2010+ edge order; the grid flag is set for a hidden edge, the
-        // reverse of the row border's `is_invisible`.
+        // reverse of the row border's `is_invisible`. A border without a
+        // linetype is by block, as AutoCAD writes it.
+        let by_block = self
+            .document
+            .line_types
+            .get("ByBlock")
+            .map_or(Handle::NULL, |line_type| line_type.handle);
         let borders = [
             (1, &row.top_border),
             (2, &row.horizontal_inside_border),
@@ -1408,7 +1414,11 @@ impl<'a> DwgObjectWriter<'a> {
                 is_invisible: !border.is_invisible,
                 ..border.clone()
             },
-            line_type: Handle::NULL,
+            line_type: if border.line_type.is_null() {
+                by_block
+            } else {
+                border.line_type
+            },
         })
         .collect();
 
