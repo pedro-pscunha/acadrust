@@ -153,3 +153,15 @@ fn a_block_cell_survives_a_dwg_from_r2010() {
         assert_eq!(content.attributes[0].value, "Acme", "{version:?}");
     }
 }
+
+#[test]
+fn a_table_with_the_default_short_has_no_value_flags_after_a_dwg() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    doc.add_entity(EntityType::Table(Box::new(Table::new(Vector3::ZERO, 1, 1))))
+        .unwrap();
+    let dwg = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+        .read()
+        .unwrap();
+    let table = table_of(&dwg);
+    assert_eq!((table.value_flags, table.dwg_unknown_short), (0, 38));
+}

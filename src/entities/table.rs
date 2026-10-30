@@ -1771,6 +1771,8 @@ fn visit_table_cell_handles(value: &mut TableCell, visit: &mut impl FnMut(&mut H
 }
 
 /// The bits of the legacy table-wide style override mask (DXF 93) that the R2010+ table content can hold.
+/// The short after the R2010+ table content when nothing sets it (ODA specification 20.4.96.2: "default 38").
+const DEFAULT_DWG_VALUE_FLAGS: i16 = 38;
 const LEGACY_FLOW: i32 = 0x4;
 const LEGACY_MARGIN_H: i32 = 0x8;
 const LEGACY_MARGIN_V: i32 = 0x10;
@@ -1836,7 +1838,11 @@ impl Table {
     /// Set the legacy fields of a table read from an R2010+ DWG from its content: the value flags (90), the flow direction and the
     /// margins of the base cell style as the table-wide overrides (93), and the legacy fields of every cell.
     pub(crate) fn derive_legacy_fields(&mut self) {
-        self.value_flags = i32::from(self.dwg_unknown_short);
+        // 38 is the default of that short: a table that has it has no value flags of its own to keep.
+        self.value_flags = match self.dwg_unknown_short {
+            DEFAULT_DWG_VALUE_FLAGS => 0,
+            flags => i32::from(flags),
+        };
         if let Some(base) = &self.base_style {
             let overridden = base.overridden();
             let mut legacy = self.legacy_style_override.take().unwrap_or_default();
@@ -2093,7 +2099,7 @@ impl Table {
             dwg_unknown_long1: 0,
             dwg_r2010_unknown_bit: None,
             dwg_unknown_long2: 0,
-            dwg_unknown_short: 38,
+            dwg_unknown_short: DEFAULT_DWG_VALUE_FLAGS,
         }
     }
 
