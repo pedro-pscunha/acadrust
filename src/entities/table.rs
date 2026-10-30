@@ -774,6 +774,9 @@ pub struct CellStyle {
     pub override_flags: i32,
     #[cfg_attr(feature = "serde", serde(default))]
     pub legacy_override_bits: bool,
+    /// `override_flags` holds the R2010+ property override bits (a style read from an R2010+ DWG), not the DXF cell bits.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub modern_override_bits: bool,
     /// Nested content-format metadata.
     pub content_format_override_flags: i32,
     pub content_property_flags: i32,
@@ -846,6 +849,7 @@ impl CellStyle {
             property_flags: CellStylePropertyFlags::NONE,
             override_flags: 0,
             legacy_override_bits: false,
+            modern_override_bits: false,
             content_format_override_flags: 0,
             content_property_flags: 0,
             value_data_type: 0,
@@ -2909,6 +2913,49 @@ pub fn legacy_override_properties(flags: i32) -> CellStylePropertyFlags {
         }
     }
     properties
+}
+
+/// The DXF cell override flags (the bits of [`cell_override_bit`]) of a cell: the bits of its style, except for a style read from an
+/// R2010+ DWG, where they are the ones the R2010+ property flags of its style, the content format overrides of its content and the border
+/// overrides stand for.
+pub(crate) fn dxf_cell_override_flags(cell: &TableCell) -> i32 {
+    let Some(style) = cell.style.as_ref() else { return 0 };
+    if !style.modern_override_bits {
+        return style.override_flags;
+    }
+    let mut properties = style.overridden();
+    if let Some(content) = cell.contents.first() {
+        properties |= CellStylePropertyFlags::from_bits_truncate(content.format_override_flags as u32);
+    }
+    let mut flags = 0;
+    for (property, bit) in [
+        (CellStylePropertyFlags::ALIGNMENT, 0x01),
+        (CellStylePropertyFlags::BACKGROUND_COLOR, 0x06),
+        (CellStylePropertyFlags::CONTENT_COLOR, 0x08),
+        (CellStylePropertyFlags::TEXT_STYLE, 0x10),
+        (CellStylePropertyFlags::TEXT_HEIGHT, 0x20),
+    ] {
+        if properties.contains(property) {
+            flags |= bit;
+        }
+    }
+    for (color_bit, weight_bit, border) in [
+        (0x40, 0x400, &style.top_border),
+        (0x80, 0x800, &style.right_border),
+        (0x100, 0x1000, &style.bottom_border),
+        (0x200, 0x2000, &style.left_border),
+    ] {
+        if border.override_flags.contains(BorderPropertyFlags::COLOR) {
+            flags |= color_bit;
+        }
+        if border
+            .override_flags
+            .intersects(BorderPropertyFlags::LINE_WEIGHT | BorderPropertyFlags::INVISIBILITY)
+        {
+            flags |= weight_bit;
+        }
+    }
+    flags
 }
 
 pub fn cell_override_bit(code: i32) -> Option<i32> {

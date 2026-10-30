@@ -3595,6 +3595,7 @@ fn read_cell_style(reader: &mut DwgMergedReader) -> Option<CellStyle> {
     }
     let mut style = CellStyle::new();
     style.style_type = CellStyleType::from(style_type as u8);
+    style.modern_override_bits = true;
     style.override_flags = reader.read_bit_long();
     style.property_flags = CellStylePropertyFlags::from_bits_retain(reader.read_bit_long() as u32);
     style.background_color = reader.read_cm_true_color();

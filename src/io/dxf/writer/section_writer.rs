@@ -12604,8 +12604,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
 
         // Cell style: only the overridden properties when the cell says which.
-        if let Some(style) = cell.style.as_ref().filter(|s| s.override_flags != 0) {
-            let f = style.override_flags;
+        let override_flags = table::dxf_cell_override_flags(cell);
+        if let Some(style) = cell.style.as_ref().filter(|_| override_flags != 0) {
+            let f = override_flags;
             if f & 0x01 != 0 {
                 self.writer.write_i16(170, style.alignment as i16)?;
             }
