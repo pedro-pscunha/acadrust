@@ -4169,6 +4169,14 @@ impl<'a> SectionReader<'a> {
                             block_entities.push(EntityType::Body(entity));
                         }
                     }
+                    "SURFACE" | "PLANESURFACE" | "EXTRUDEDSURFACE" | "LOFTEDSURFACE"
+                    | "REVOLVEDSURFACE" | "SWEPTSURFACE" | "NURBSURFACE" => {
+                        if let Some(entity) =
+                            self.read_surface_entity(&pair.value_string, document.version)?
+                        {
+                            block_entities.push(EntityType::Surface(Box::new(entity)));
+                        }
+                    }
                     "ACAD_TABLE" | "TABLE" => {
                         if let Some(entity) = self.read_table_entity()? {
                             block_entities.push(EntityType::Table(Box::new(entity)));
@@ -20031,6 +20039,8 @@ impl<'a> SectionReader<'a> {
     ) -> Result<Option<Surface>> {
         let kind = SurfaceKind::from_dxf_name(entity_name);
         let mut surface = Surface::new(kind);
+        let mut cache = None;
+        let mut cache_materials = Vec::new();
         let mut subclass = String::new();
         let mut acis_text = String::new();
         let mut acis_version = 1i16;
@@ -20080,6 +20090,22 @@ impl<'a> SectionReader<'a> {
             }
             if pair.code == 100 {
                 subclass = pair.value_string.clone();
+                if subclass == crate::io::surface_cache::SUBCLASS {
+                    cache.get_or_insert_with(Vec::new);
+                }
+                continue;
+            }
+            if subclass == crate::io::surface_cache::SUBCLASS {
+                match pair.code {
+                    310 => crate::io::surface_cache::append_hex(
+                        cache.get_or_insert_with(Vec::new),
+                        &pair.value_string,
+                    )?,
+                    340 => cache_materials.push(parse_dxf_handle(&pair.value_string)),
+                    _ => {
+                        self.try_read_common_entity_code(&pair, &mut surface.common)?;
+                    }
+                }
                 continue;
             }
             if pair.code == crate::io::dxf::EMBEDDED_LAYOUT_GROUP {
@@ -20601,6 +20627,9 @@ impl<'a> SectionReader<'a> {
         if proxy_graphics_size != 0 || !proxy_graphics.is_empty() {
             proxy_graphics.truncate(proxy_graphics_size);
             surface.common.graphic_data = Some(proxy_graphics);
+        }
+        if let Some(cache) = cache {
+            crate::io::surface_cache::restore(&cache, &cache_materials, &mut surface)?;
         }
         Ok(Some(surface))
     }
