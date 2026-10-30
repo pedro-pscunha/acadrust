@@ -2320,8 +2320,16 @@ impl<'a> DwgObjectWriter<'a> {
                 Some(EntityType::AttributeDefinition(_))
             )
         });
+        // AutoCAD does not set it on the records of model and paper space, whatever they hold
+        // (0 of 11 layout records of a drawing with 8 layouts holding ATTDEFs; 45 of 45 other
+        // blocks with an ATTDEF have it).
+        let layout_record = record.name.eq_ignore_ascii_case("*Model_Space")
+            || record
+                .name
+                .get(..12)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("*Paper_Space"));
         self.writer
-            .write_bit(record.flags.has_attributes || has_attributes);
+            .write_bit(!layout_record && (record.flags.has_attributes || has_attributes));
         // Is xref
         self.writer.write_bit(record.flags.is_xref);
         // Is xref overlay
