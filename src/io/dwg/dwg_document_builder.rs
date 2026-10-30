@@ -4873,8 +4873,13 @@ impl DwgDocumentBuilder {
                     let mut dim = DimensionAngular2Ln::default();
                     dim.base.common = entity_common;
                     map_dimension_common(&mut dim.base, &data.common, &maps);
-                    dim.dimension_arc =
-                        crate::types::Vector3::new(data.dimension_arc.x, data.dimension_arc.y, 0.0);
+                    // The DWG holds the arc point as a 2D point; its Z is the elevation of the common data, which also
+                    // places the text midpoint (ODA: "Z-coord for the ECS points (11, 12, 16)").
+                    dim.dimension_arc = crate::types::Vector3::new(
+                        data.dimension_arc.x,
+                        data.dimension_arc.y,
+                        dim.base.text_middle_point.z,
+                    );
                     dim.first_point = data.first_point;
                     dim.second_point = data.second_point;
                     dim.angle_vertex = data.angle_vertex;
