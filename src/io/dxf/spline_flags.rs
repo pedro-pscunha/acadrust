@@ -25,7 +25,7 @@ pub(super) fn read(spline: &mut Spline, flags: i16) {
     if flags & FIT_METHOD != 0 {
         // Fit data must keep UseKnotParameter when subsequently written to DWG.
         spline.dwg_flags1 |= 1 | 8;
-        if spline.flags.closed {
+        if spline.flags.periodic {
             spline.dwg_flags1 |= 4;
         }
     }

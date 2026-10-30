@@ -100,7 +100,11 @@ fn literal_dxf_reads_frame_visibility_and_fit_storage_context() {
     assert!(s.cv_frame_visible);
     assert!(s.flags.closed);
     assert_eq!(s.knot_parameterization, 2);
-    assert_eq!(s.dwg_flags1 & 15, 15);
+    // Bit 4 of the DWG flags is Periodic: this spline is closed only.
+    assert_eq!(s.dwg_flags1 & 15, 11);
+    // Closed and periodic (1667) sets it.
+    let periodic = read_dxf(literal_spline(1667));
+    assert_eq!(first_spline(&periodic).dwg_flags1 & 15, 15);
 }
 
 #[test]

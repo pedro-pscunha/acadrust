@@ -1646,7 +1646,9 @@ impl<'a> DwgObjectWriter<'a> {
                 // UseKnotParameter. Omitting bit 8 makes readers parse the
                 // following fit-point body as control-point data.
                 flags1 |= 1 | 8;
-                if e.flags.closed {
+                // Bit 4 of a fit-point spline is AutoCAD's Periodic, not Closed: a closed
+                // spline that is not periodic has bits 1 and 8 only.
+                if e.flags.periodic {
                     flags1 |= 4;
                 } else {
                     flags1 &= !4;

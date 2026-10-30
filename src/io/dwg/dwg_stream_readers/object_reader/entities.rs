@@ -1390,10 +1390,12 @@ pub fn read_spline(
     let degree = reader.read_bit_long();
 
     let mut rational = false;
-    // Fit-point splines have no closed bit in their scenario body. R2013+
-    // stores it in splineflags1 instead.
-    let mut closed = flags1 & 4 != 0;
-    let mut periodic = false;
+    // Fit-point splines have no closed or periodic bit in their scenario body.
+    // R2013+ stores Periodic in splineflags1 bit 4 (a periodic spline is closed);
+    // a spline closed but not periodic has its first and last fit point equal.
+    let fit_periodic = flags1 & 4 != 0;
+    let mut closed = fit_periodic;
+    let mut periodic = fit_periodic;
     let mut knot_tolerance = 0.0;
     let mut control_tolerance = 0.0;
     let mut knots = Vec::new();

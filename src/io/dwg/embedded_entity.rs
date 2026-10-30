@@ -505,12 +505,13 @@ fn write_spline(
         } else {
             flags &= !2;
         }
-        if entity.flags.closed {
-            flags |= 4;
-        } else {
-            flags &= !4;
-        }
+        // Bit 4 of a fit-point spline is Periodic; a control-point record keeps the source flag word.
         if scenario == 2 {
+            if entity.flags.periodic {
+                flags |= 4;
+            } else {
+                flags &= !4;
+            }
             flags |= 1 | 8;
         } else {
             flags &= !8;
