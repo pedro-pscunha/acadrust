@@ -1,7 +1,8 @@
-//! A clockwise hatch arc edge read from an AutoCAD DWG means the same arc as in DXF: AutoCAD stores
-//! 360 minus each real angle in both formats. The DWG reader used to keep the stored angles, so the
-//! arc of `tests/fixtures/hatch/README.md` started at (20,10) instead of (20,-10), and a DXF written
-//! from it made CAD programs draw a near-full circle (Eztec Firenze hatch 5190D, radius 1991).
+//! A clockwise hatch arc edge from an AutoCAD DWG means the same arc as in DXF: AutoCAD stores 360
+//! minus each real angle in both formats, and the model keeps the stored angles (see
+//! `CircularArcEdge`), so the DXF written from a DWG holds AutoCAD's own groups (Eztec Firenze hatch
+//! 5190D, radius 1991, came out as a near-full circle when one side converted and the other did not).
+//! The real arc is `2 PI` minus each stored angle.
 
 use acadrust::entities::hatch::BoundaryEdge;
 use acadrust::entities::EntityType;
@@ -36,7 +37,9 @@ fn a_clockwise_arc_edge_from_autocad_starts_where_the_previous_edge_ends() {
         })
         .expect("the bite is an arc edge");
     assert!(!arc.counter_clockwise, "AutoCAD stores the bite clockwise");
+    // A clockwise edge runs from `2 PI - start` to `2 PI - end`.
     let at = |a: f64| {
+        let a = std::f64::consts::TAU - a;
         (
             arc.center.x + arc.radius * a.cos(),
             arc.center.y + arc.radius * a.sin(),

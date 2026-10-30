@@ -340,7 +340,7 @@ fn read_dgn_stroke_pattern_dxf(
     let mut end_widths = take_all_dgn_properties(properties, subclass, 45);
     let mut width_modes = take_all_dgn_properties(properties, subclass, 94);
     let mut cap_modes = take_all_dgn_properties(properties, subclass, 95);
-    let mut strokes = Vec::with_capacity(count);
+    let mut strokes = Vec::with_capacity(count.min(100_000));
     for _ in 0..count {
         strokes.push(DgnLsStroke {
             is_dash: dgn_bool(take_first(&mut dash)),
@@ -935,23 +935,13 @@ fn class_dxf_hatch_context_boundary(
                 start: fields.point2(section, 10),
                 end: fields.point2(section, 11),
             })),
-            2 => {
-                let counter_clockwise = fields.bool(section, 73);
-                let mut start_angle = fields.f64(section, 50).to_radians();
-                let mut end_angle = fields.f64(section, 51).to_radians();
-                // A clockwise edge's angles are stored as 360 minus each.
-                if !counter_clockwise {
-                    start_angle = std::f64::consts::TAU - start_angle;
-                    end_angle = std::f64::consts::TAU - end_angle;
-                }
-                path.add_edge(BoundaryEdge::CircularArc(CircularArcEdge {
-                    center: fields.point2(section, 10),
-                    radius: fields.f64(section, 40),
-                    start_angle,
-                    end_angle,
-                    counter_clockwise,
-                }))
-            }
+            2 => path.add_edge(BoundaryEdge::CircularArc(CircularArcEdge {
+                center: fields.point2(section, 10),
+                radius: fields.f64(section, 40),
+                start_angle: fields.f64(section, 50).to_radians(),
+                end_angle: fields.f64(section, 51).to_radians(),
+                counter_clockwise: fields.bool(section, 73),
+            })),
             3 => {
                 let minor_axis_ratio = fields.f64(section, 40);
                 // Groups 50/51 are circular angles in degrees, same as a HATCH
@@ -11889,17 +11879,25 @@ impl<'a> SectionReader<'a> {
     }
 
     /// Read an MTEXT R2018+ embedded object (code 101 block), extracting the
-    /// column layout. The MTEXT column data lives here rather than in the
-    /// entity's own codes; other embedded-object codes are consumed and
-    /// ignored. Stops at the next 0-code or the XDATA (>=1000) region.
-    fn read_mtext_embedded_object(&mut self) -> Result<crate::entities::mtext::MTextColumnData> {
+    /// column layout and the attachment point of that layout (group 70). The
+    /// MTEXT column data lives here rather than in the entity's own codes;
+    /// other embedded-object codes are consumed and ignored. Stops at the
+    /// next 0-code or the XDATA (>=1000) region.
+    fn read_mtext_embedded_object(
+        &mut self,
+    ) -> Result<(
+        crate::entities::mtext::MTextColumnData,
+        Option<crate::entities::mtext::AttachmentPoint>,
+    )> {
         let mut col = crate::entities::mtext::MTextColumnData::new();
+        let mut attachment = None;
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 || pair.code >= 1000 {
                 self.reader.push_back(pair);
                 break;
             }
             match pair.code {
+                70 => attachment = pair.as_i16().map(Into::into),
                 71 => {
                     if let Some(v) = pair.as_i16() {
                         col.column_type = v;
@@ -11938,7 +11936,7 @@ impl<'a> SectionReader<'a> {
                 _ => {}
             }
         }
-        Ok(col)
+        Ok((col, attachment))
     }
 
     /// Try to read common entity codes, including visual-style handle 348.
@@ -13829,6 +13827,7 @@ impl<'a> SectionReader<'a> {
         let mut x_direction = PointReader::new();
         let mut rotation_from_code50 = None;
         let mut reading_columns = false;
+        let mut has_group_71 = false;
 
         while let Some(pair) = self.reader.read_pair()? {
             if pair.code == 0 {
@@ -13904,6 +13903,7 @@ impl<'a> SectionReader<'a> {
                             9 => AttachmentPoint::BottomRight,
                             _ => AttachmentPoint::TopLeft,
                         };
+                        has_group_71 = true;
                     }
                 }
                 72 => {
@@ -14006,9 +14006,17 @@ impl<'a> SectionReader<'a> {
                 }
                 // R2018+ column/layout companion — its codes shadow the
                 // entity's own, so it must not fall through this match. The
-                // embedded object carries the MTEXT column layout.
+                // embedded object carries the MTEXT column layout. Group 70
+                // provides a fallback attachment point when the entity's group 71
+                // is absent; when group 71 is present it takes precedence (#249).
                 101 => {
-                    mtext.column_data = self.read_mtext_embedded_object()?;
+                    let (columns, attachment) = self.read_mtext_embedded_object()?;
+                    mtext.column_data = columns;
+                    if !has_group_71 {
+                        if let Some(attachment) = attachment {
+                            mtext.attachment_point = attachment;
+                        }
+                    }
                     reading_columns = false;
                 }
                 _ => {
@@ -16286,13 +16294,17 @@ impl<'a> SectionReader<'a> {
                 }
                 97 => {
                     // Number of source boundary objects
-                    let num_handles = pair.as_i32().unwrap_or(0);
+                    let num_handles = pair.as_i32().unwrap_or(0).max(0) as usize;
+                    current_path_handles.reserve(num_handles.min(100_000));
                     for _ in 0..num_handles {
                         if let Some(hp) = self.reader.read_pair()? {
                             if hp.code == 330 {
                                 if let Some(h) = hp.as_handle() {
                                     current_path_handles.push(Handle::new(h));
                                 }
+                            } else {
+                                self.reader.push_back(hp);
+                                break;
                             }
                         }
                     }
@@ -16520,11 +16532,6 @@ impl<'a> SectionReader<'a> {
                 }
             }
         }
-        // A clockwise edge's angles are stored as 360 minus each (see the writer).
-        if !edge.counter_clockwise {
-            edge.start_angle = std::f64::consts::TAU - edge.start_angle;
-            edge.end_angle = std::f64::consts::TAU - edge.end_angle;
-        }
         Ok(edge)
     }
 
@@ -16612,7 +16619,9 @@ impl<'a> SectionReader<'a> {
         }
 
         // Read knot values (code 40)
-        for _ in 0..num_knots {
+        let knot_count = num_knots.max(0) as usize;
+        edge.knots.reserve(knot_count.min(100_000));
+        for _ in 0..knot_count {
             if let Some(p) = self.reader.read_pair()? {
                 if p.code == 40 {
                     edge.knots.push(p.as_double().unwrap_or(0.0));
@@ -16624,7 +16633,9 @@ impl<'a> SectionReader<'a> {
         }
 
         // Read control points (codes 10/20, with optional weight 42)
-        for _ in 0..num_control_points {
+        let control_point_count = num_control_points.max(0) as usize;
+        edge.control_points.reserve(control_point_count.min(100_000));
+        for _ in 0..control_point_count {
             let mut x = 0.0;
             let mut y = 0.0;
             let mut w = 1.0;
@@ -16634,7 +16645,7 @@ impl<'a> SectionReader<'a> {
                     x = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
-                    continue;
+                    break;
                 }
             }
             if let Some(p) = self.reader.read_pair()? {
@@ -16642,6 +16653,7 @@ impl<'a> SectionReader<'a> {
                     y = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
+                    break;
                 }
             }
             // Peek for optional weight (code 42)
@@ -16665,7 +16677,9 @@ impl<'a> SectionReader<'a> {
         }
 
         // Read fit points (codes 11/21)
-        for _ in 0..num_fit_points {
+        let fit_point_count = num_fit_points.max(0) as usize;
+        edge.fit_points.reserve(fit_point_count.min(100_000));
+        for _ in 0..fit_point_count {
             let mut x = 0.0;
             let mut y = 0.0;
             if let Some(p) = self.reader.read_pair()? {
@@ -16673,7 +16687,7 @@ impl<'a> SectionReader<'a> {
                     x = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
-                    continue;
+                    break;
                 }
             }
             if let Some(p) = self.reader.read_pair()? {
@@ -16681,6 +16695,7 @@ impl<'a> SectionReader<'a> {
                     y = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
+                    break;
                 }
             }
             edge.fit_points.push(Vector2::new(x, y));
@@ -16726,13 +16741,14 @@ impl<'a> SectionReader<'a> {
             }
         }
 
+        let vertex_count = num_vertices.max(0) as usize;
         let mut edge = crate::entities::hatch::PolylineEdge {
-            vertices: Vec::with_capacity(num_vertices as usize),
+            vertices: Vec::with_capacity(vertex_count.min(100_000)),
             is_closed,
         };
 
         // Read vertices: 10/20 (coords), optional 42 (bulge)
-        for _ in 0..num_vertices {
+        for _ in 0..vertex_count {
             let mut x = 0.0;
             let mut y = 0.0;
             let mut bulge = 0.0;
@@ -16741,7 +16757,7 @@ impl<'a> SectionReader<'a> {
                     x = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
-                    continue;
+                    break;
                 }
             }
             if let Some(p) = self.reader.read_pair()? {
@@ -16749,6 +16765,7 @@ impl<'a> SectionReader<'a> {
                     y = p.as_double().unwrap_or(0.0);
                 } else {
                     self.reader.push_back(p);
+                    break;
                 }
             }
             if has_bulge {

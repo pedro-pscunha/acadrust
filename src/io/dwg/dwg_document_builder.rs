@@ -93,20 +93,13 @@ fn boundary_path_from_dwg(path: entities::HatchBoundaryPath) -> crate::entities:
                 end: value.end,
             })),
             entities::HatchEdge::Arc(value) => {
-                // A clockwise edge stores 360 minus each angle, in DWG as in DXF (the DXF
-                // reader converts the same way), so the edge holds the arc's real angles.
-                let real = |a: f64| {
-                    if value.ccw {
-                        a
-                    } else {
-                        std::f64::consts::TAU - a
-                    }
-                };
+                // A clockwise edge keeps the angles the file stores (360 minus each real angle,
+                // in DWG as in DXF); see `CircularArcEdge`.
                 result.add_edge(BoundaryEdge::CircularArc(CircularArcEdge {
                     center: value.center,
                     radius: value.radius,
-                    start_angle: real(value.start_angle),
-                    end_angle: real(value.end_angle),
+                    start_angle: value.start_angle,
+                    end_angle: value.end_angle,
                     counter_clockwise: value.ccw,
                 }))
             }

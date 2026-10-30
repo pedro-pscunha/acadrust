@@ -1539,7 +1539,8 @@ fn prepare_header(
         super::dwg_stream_writers::object_writer::paper_space_block_handle(document);
 
     // ── Sync current style handles (validate against actual objects) ──
-    // CLAYER: must point to an actual layer; fall back to "0" if invalid
+    // CLAYER: must point to an actual layer; fall back to "0" if invalid. A DXF names the
+    // current layer ($CLAYER) and not its handle: the name is resolved below.
     {
         let clayer_valid = !h.current_layer_handle.is_null()
             && document

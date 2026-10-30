@@ -394,6 +394,22 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
     }
 
+    /// The handle the writer gives the next record it creates itself, such as
+    /// a polyline VERTEX or a SEQEND.
+    pub fn next_handle(&self) -> u64 {
+        self.next_handle
+    }
+
+    /// Number the records the writer creates from `next` on.
+    ///
+    /// Writing several documents into one DXF (for example, the entities of
+    /// a drawing read in parts) with one writer each, pass each writer the
+    /// previous one's [`next_handle`](Self::next_handle) so the records they
+    /// create get distinct handles.
+    pub fn set_next_handle(&mut self, next: u64) {
+        self.next_handle = next;
+    }
+
     /// Build the set of all handles that will appear in the output DXF.
     /// Call this before writing BLOCKS / ENTITIES / OBJECTS.
     pub fn build_valid_handles(&mut self, document: &CadDocument) {
@@ -5834,18 +5850,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_double(10, arc.center.x)?;
                 self.writer.write_double(20, arc.center.y)?;
                 self.writer.write_double(40, arc.radius)?;
-                // AutoCAD stores a clockwise edge's angles as 360 minus each
-                // (ezdxf's ArcEdge says the same), so the file means the same arc.
-                let (start, end) = if arc.counter_clockwise {
-                    (super::degrees(arc.start_angle), super::degrees(arc.end_angle))
-                } else {
-                    (
-                        360.0 - super::degrees(arc.start_angle),
-                        360.0 - super::degrees(arc.end_angle),
-                    )
-                };
-                self.writer.write_double(50, start)?;
-                self.writer.write_double(51, end)?;
+                self.writer
+                    .write_double(50, super::degrees(arc.start_angle))?;
+                self.writer
+                    .write_double(51, super::degrees(arc.end_angle))?;
                 self.writer
                     .write_i16(73, if arc.counter_clockwise { 1 } else { 0 })?;
             }
