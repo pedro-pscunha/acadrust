@@ -29,15 +29,15 @@ use super::stream_writer::{DxfStreamWriter, DxfStreamWriterExt};
 use crate::io::dxf::EMBEDDED_LAYOUT_GROUP;
 use std::collections::{HashMap, HashSet};
 
-/// Sanitize a symbol table record name: strip control characters and
-/// characters forbidden by ACAD (`< > / \ " : ; ? * | , = \``).
+/// Sanitize a symbol table record name: strip control characters and characters forbidden by ACAD (`< > / \ " : ; ? * , = \``).
+/// The `|` stays: it joins the xref name to the name of an xref-dependent symbol (`xref|App`).
 fn sanitize_symbol_name(name: &str) -> String {
     name.chars()
         .filter(|c| {
             !c.is_control()
                 && !matches!(
                     c,
-                    '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | '|' | ',' | '=' | '`'
+                    '<' | '>' | '/' | '\\' | '"' | ':' | ';' | '?' | '*' | ',' | '=' | '`'
                 )
         })
         .collect()
@@ -1794,6 +1794,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if ltype.xref_dependent {
             flags |= 0x10;
         }
+        if ltype.xref_resolved {
+            flags |= 0x20;
+        }
         self.writer.write_i16(70, flags)?;
         self.writer.write_string(3, &ltype.description)?;
         self.writer.write_i16(72, 65)?; // Alignment code (always 65)
@@ -1909,6 +1912,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         if layer.flags.xref_dependent {
             flags |= 0x10;
+        }
+        if layer.flags.xref_resolved {
+            flags |= 0x20;
         }
         self.writer.write_i16(70, flags)?;
 
@@ -2063,6 +2069,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         if style.xref_dependent {
             flags |= 0x10;
+        }
+        if style.xref_resolved {
+            flags |= 0x20;
         }
         self.writer.write_i16(70, flags)?;
         self.writer.write_double(40, style.height)?;
@@ -2321,7 +2330,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.writer.write_subclass("AcDbSymbolTableRecord")?;
         self.writer.write_subclass("AcDbRegAppTableRecord")?;
         self.writer.write_string(2, &name)?;
-        self.writer.write_i16(70, 0)?;
+        self.writer.write_i16(
+            70,
+            i16::from(appid.xref_dependent) << 4 | i16::from(appid.xref_resolved) << 5,
+        )?;
         self.write_table_xdata(document, appid.handle, &[])?;
         Ok(())
     }

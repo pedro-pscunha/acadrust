@@ -72,6 +72,8 @@ pub struct LineType {
     pub alignment: char,
     /// Whether this linetype is externally dependent on an xref
     pub xref_dependent: bool,
+    /// ... and the xref is resolved (DXF 70 bit 32).
+    pub xref_resolved: bool,
     /// Block record of the xref this linetype came from (NULL when local).
     pub xref_block_record_handle: Handle,
 }
@@ -87,6 +89,7 @@ impl LineType {
             pattern_length: 0.0,
             alignment: 'A',
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
         }
     }
@@ -101,6 +104,7 @@ impl LineType {
             pattern_length: 0.0,
             alignment: 'A',
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
         }
     }
@@ -115,6 +119,7 @@ impl LineType {
             pattern_length: 0.0,
             alignment: 'A',
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
         }
     }
@@ -129,6 +134,7 @@ impl LineType {
             pattern_length: 0.0,
             alignment: 'A',
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
         }
     }

@@ -18,6 +18,9 @@ pub struct LayerFlags {
     pub off: bool,
     /// Layer is xref-dependent (name contains `|`)
     pub xref_dependent: bool,
+    /// ... and the xref is resolved (DXF 70 bit 32)
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub xref_resolved: bool,
 }
 
 impl LayerFlags {
@@ -29,6 +32,7 @@ impl LayerFlags {
             frozen_in_new_viewport: false,
             off: false,
             xref_dependent: false,
+            xref_resolved: false,
         }
     }
 

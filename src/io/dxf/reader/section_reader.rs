@@ -10047,6 +10047,7 @@ impl<'a> SectionReader<'a> {
                         // while fully visible, and reading it as off hid every
                         // grid line on DXF import (#314).
                         layer.flags.xref_dependent = (flags & 0x10) != 0;
+                        layer.flags.xref_resolved = (flags & 0x20) != 0;
                     }
                 }
                 290 => {
@@ -10152,6 +10153,7 @@ impl<'a> SectionReader<'a> {
                 70 => {
                     if let Some(flags) = pair.as_i16() {
                         linetype.xref_dependent = (flags & 0x10) != 0;
+                        linetype.xref_resolved = (flags & 0x20) != 0;
                     }
                 }
                 73 => {
@@ -10307,6 +10309,7 @@ impl<'a> SectionReader<'a> {
                         style.is_shape_file = (f & 0x01) != 0;
                         style.is_vertical = (f & 0x04) != 0;
                         style.xref_dependent = (f & 0x10) != 0;
+                        style.xref_resolved = (f & 0x20) != 0;
                     }
                 }
                 3 => style.font_file = pair.value_string.clone(),
@@ -11082,6 +11085,12 @@ impl<'a> SectionReader<'a> {
                     }
                 }
                 2 => appid.name = pair.value_string.clone(),
+                70 => {
+                    if let Some(v) = pair.as_i16() {
+                        appid.xref_dependent = (v & 0x10) != 0;
+                        appid.xref_resolved = (v & 0x20) != 0;
+                    }
+                }
                 _ => {}
             }
         }

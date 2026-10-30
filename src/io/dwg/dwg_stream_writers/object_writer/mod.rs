@@ -989,7 +989,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_variable_text(&layer.name);
 
         // Xref-dependant bit
-        self.write_xref_dependant_bit_value(layer.flags.xref_dependent);
+        self.write_xref_table_flags(false, layer.flags.xref_resolved, layer.flags.xref_dependent);
 
         if self.version.r2000_plus() {
             let lw_index = layer.line_weight.to_dwg_index() as i16;
@@ -1128,7 +1128,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_variable_text(&style.name);
 
         // Xref-dependent flag
-        self.write_xref_dependant_bit_value(style.xref_dependent);
+        self.write_xref_table_flags(false, style.xref_resolved, style.xref_dependent);
 
         // Shape file flag
         self.writer.write_bit(style.is_shape_file);
@@ -1187,7 +1187,7 @@ impl<'a> DwgObjectWriter<'a> {
         self.writer.write_variable_text(&ltype.name);
         // Xref-dependent flag (linetypes that came in through an xref keep it,
         // otherwise AUDIT renames every "xref|name" record).
-        self.write_xref_dependant_bit_value(ltype.xref_dependent);
+        self.write_xref_table_flags(false, ltype.xref_resolved, ltype.xref_dependent);
         // Description
         self.writer.write_variable_text(&ltype.description);
         // Pattern length
@@ -1657,7 +1657,6 @@ impl<'a> DwgObjectWriter<'a> {
                             | ';'
                             | '?'
                             | '*'
-                            | '|'
                             | ','
                             | '='
                             | '`'
@@ -1665,7 +1664,7 @@ impl<'a> DwgObjectWriter<'a> {
             })
             .collect();
         self.writer.write_variable_text(&name);
-        self.write_xref_dependant_bit();
+        self.write_xref_table_flags(false, app.xref_resolved, app.xref_dependent);
 
         // Unknown byte (group 71)
         self.writer.write_byte(0);

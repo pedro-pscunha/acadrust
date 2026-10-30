@@ -57,6 +57,8 @@ pub struct TextStyle {
     pub true_type_font_flags: i32,
     /// Whether this style is xref-dependent
     pub xref_dependent: bool,
+    /// ... and the xref is resolved (DXF 70 bit 32).
+    pub xref_resolved: bool,
     /// Block record of the xref this style came from (NULL when local).
     pub xref_block_record_handle: Handle,
     /// Whether this STYLE record names an SHX shape file.
@@ -89,6 +91,7 @@ impl TextStyle {
             true_type_font: String::new(),
             true_type_font_flags: default_true_type_font_flags(),
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
             is_shape_file: false,
             is_vertical: false,
@@ -111,6 +114,7 @@ impl TextStyle {
             true_type_font: String::new(),
             true_type_font_flags: default_true_type_font_flags(),
             xref_dependent: false,
+            xref_resolved: false,
             xref_block_record_handle: Handle::NULL,
             is_shape_file: false,
             is_vertical: false,

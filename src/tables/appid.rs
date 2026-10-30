@@ -11,6 +11,10 @@ pub struct AppId {
     pub handle: Handle,
     /// Application name
     pub name: String,
+    /// The application belongs to an xref (DXF 70 bit 16).
+    pub xref_dependent: bool,
+    /// ... and the xref is resolved (bit 32).
+    pub xref_resolved: bool,
 }
 
 impl AppId {
@@ -19,6 +23,8 @@ impl AppId {
         AppId {
             handle: Handle::NULL,
             name: name.into(),
+            xref_dependent: false,
+            xref_resolved: false,
         }
     }
 

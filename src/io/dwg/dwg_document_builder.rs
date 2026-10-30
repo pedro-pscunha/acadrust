@@ -1518,6 +1518,7 @@ impl DwgDocumentBuilder {
                     layer.flags.frozen_in_new_viewport = data.frozen_in_new_vp;
                     layer.flags.locked = data.locked;
                     layer.flags.xref_dependent = data.xref_dependent;
+                    layer.flags.xref_resolved = data.xref_resolved;
                     layer.is_plottable = data.plottable;
                     layer.line_weight = LineWeight::from_value(data.line_weight);
                     layer.color = data.color;
@@ -1655,6 +1656,7 @@ impl DwgDocumentBuilder {
                     style.flags.upside_down = (data.generation & 4) != 0;
                     // Only mark xref-dependent if the xref block record handle is valid
                     style.xref_dependent = data.xref_dependent && data.xref_handle != 0;
+                    style.xref_resolved = data.xref_resolved && style.xref_dependent;
                     style.xref_block_record_handle = Handle::from(data.xref_handle);
                     // Use add_allow_duplicate for shape-file-only styles (empty name)
                     // so multiple empty-named styles are preserved. Named styles use
@@ -1671,6 +1673,7 @@ impl DwgDocumentBuilder {
                     lt.description = data.description.clone();
                     lt.pattern_length = data.pattern_length;
                     lt.xref_dependent = data.xref_dependent;
+                    lt.xref_resolved = data.xref_resolved;
                     lt.xref_block_record_handle = Handle::from(data.xref_handle);
                     lt.elements = data
                         .segments
@@ -1967,6 +1970,8 @@ impl DwgDocumentBuilder {
                 ParsedEntry::AppId(h, data) => {
                     let mut app = crate::tables::AppId::new(&data.name);
                     app.handle = Handle::from(*h);
+                    app.xref_dependent = data.xref_dependent;
+                    app.xref_resolved = data.xref_resolved;
                     let _ = document.app_ids.remove(&data.name);
                     let _ = document.app_ids.add(app);
                 }

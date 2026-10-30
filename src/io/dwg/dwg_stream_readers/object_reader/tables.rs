@@ -81,6 +81,7 @@ pub struct LayerData {
     pub color_name: Option<String>,
     pub book_name: Option<String>,
     pub xref_dependent: bool,
+    pub xref_resolved: bool,
     pub xref_handle: u64,
     pub plotstyle_handle: Option<u64>,
     pub material_handle: Option<u64>,
@@ -103,6 +104,7 @@ pub struct TextStyleData {
     pub font_file: String,
     pub big_font_file: String,
     pub xref_dependent: bool,
+    pub xref_resolved: bool,
     pub xref_handle: u64,
 }
 
@@ -116,6 +118,7 @@ pub struct LinetypeData {
     pub alignment: u8,
     pub segments: Vec<LinetypeSegment>,
     pub xref_dependent: bool,
+    pub xref_resolved: bool,
     pub xref_handle: u64,
     pub shape_handles: Vec<u64>,
 }
@@ -267,6 +270,8 @@ pub struct AppIdData {
     pub name: String,
     pub unknown_byte: u8,
     pub xref_handle: u64,
+    pub xref_dependent: bool,
+    pub xref_resolved: bool,
 }
 
 /// Parsed DIMSTYLE data.
@@ -519,7 +524,9 @@ pub fn read_layer(
     let name = reader.read_variable_text();
 
     // Xref-dependant bits (version-dependent encoding)
-    let xref_dependent = read_xref_dependant_bits(reader, version);
+    let xref = read_xref_table_flags(reader, version);
+    let xref_dependent = xref.dependent;
+    let xref_resolved = xref.resolved;
 
     let frozen;
     let off;
@@ -587,6 +594,7 @@ pub fn read_layer(
         color_name,
         book_name,
         xref_dependent,
+        xref_resolved,
         xref_handle,
         plotstyle_handle,
         material_handle,
@@ -598,7 +606,8 @@ pub fn read_layer(
 /// Read text STYLE table entry data.
 pub fn read_text_style(reader: &mut DwgMergedReader, version: DwgVersion) -> TextStyleData {
     let name = reader.read_variable_text();
-    let xref_dependent = read_xref_dependant_bits(reader, version);
+    let xref = read_xref_table_flags(reader, version);
+    let (xref_dependent, xref_resolved) = (xref.dependent, xref.resolved);
 
     let is_shape_file = reader.read_bit();
     let is_vertical = reader.read_bit();
@@ -624,6 +633,7 @@ pub fn read_text_style(reader: &mut DwgMergedReader, version: DwgVersion) -> Tex
         font_file,
         big_font_file,
         xref_dependent,
+        xref_resolved,
         xref_handle,
     }
 }
@@ -677,7 +687,8 @@ fn extract_text_strings(
 /// Read LTYPE table entry data.
 pub fn read_linetype(reader: &mut DwgMergedReader, version: DwgVersion) -> LinetypeData {
     let name = reader.read_variable_text();
-    let xref_dependent = read_xref_dependant_bits(reader, version);
+    let xref = read_xref_table_flags(reader, version);
+    let (xref_dependent, xref_resolved) = (xref.dependent, xref.resolved);
 
     let description = reader.read_variable_text();
     let pattern_length = reader.read_bit_double();
@@ -745,6 +756,7 @@ pub fn read_linetype(reader: &mut DwgMergedReader, version: DwgVersion) -> Linet
         alignment,
         segments,
         xref_dependent,
+        xref_resolved,
         xref_handle,
         shape_handles,
     }
@@ -1094,7 +1106,7 @@ pub fn read_vport(reader: &mut DwgMergedReader, version: DwgVersion) -> VPortDat
 /// Read APPID table entry data.
 pub fn read_appid(reader: &mut DwgMergedReader, version: DwgVersion) -> AppIdData {
     let name = reader.read_variable_text();
-    read_xref_dependant_bits(reader, version);
+    let xref = read_xref_table_flags(reader, version);
 
     let unknown_byte = reader.read_byte();
     let xref_handle = reader.read_handle();
@@ -1103,6 +1115,8 @@ pub fn read_appid(reader: &mut DwgMergedReader, version: DwgVersion) -> AppIdDat
         name,
         unknown_byte,
         xref_handle,
+        xref_dependent: xref.dependent,
+        xref_resolved: xref.resolved,
     }
 }
 
