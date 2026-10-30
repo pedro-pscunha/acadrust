@@ -3585,8 +3585,22 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer.write_bit_long(style_id);
             self.writer.write_bit_double(row.height);
         }
-        self.writer.write_bit_long(e.field_handles.len() as i32);
-        for handle in &e.field_handles {
+        // The cells' fields: the table's own list, else the fields its cells show (a table read from a DXF has no list).
+        let cell_fields: Vec<Handle> = e
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter())
+            .flat_map(|cell| cell.contents.iter())
+            .filter(|content| content.content_type == TableCellContentType::Field)
+            .filter_map(|content| content.field_handle)
+            .collect();
+        let field_handles = if e.field_handles.is_empty() {
+            &cell_fields
+        } else {
+            &e.field_handles
+        };
+        self.writer.write_bit_long(field_handles.len() as i32);
+        for handle in field_handles {
             self.writer
                 .write_handle(DwgReferenceType::HardPointer, handle.value());
         }

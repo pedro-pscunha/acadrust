@@ -182,3 +182,36 @@ fn the_dxf_cell_flag_does_not_set_the_r2010_geometry_flag() {
         assert_eq!(dwg(0), dwg(5), "{version:?}");
     }
 }
+
+/// A field cell as cadcraft writes one: the field (344) and its cached text (1) in the cell. The text must not turn the field into a
+/// value.
+#[test]
+fn the_cached_text_of_a_field_cell_does_not_make_it_a_value() {
+    use acadrust::entities::table::TableCellContentType;
+    let dxf = "0\nSECTION\n2\nENTITIES\n0\nACAD_TABLE\n5\n20\n100\nAcDbBlockReference\n2\n*T1\n10\n0\n20\n0\n30\n0\n100\nAcDbTable\n280\n0\n11\n1\n21\n0\n31\n0\n90\n0\n91\n1\n92\n1\n141\n1\n142\n1\n171\n1\n173\n0\n175\n1\n176\n1\n344\n30\n1\nshown\n0\nENDSEC\n0\nEOF\n";
+    let doc = DxfReader::from_reader(Cursor::new(dxf.as_bytes().to_vec()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let content = &table_of(&doc).rows[0].cells[0].contents[0];
+    assert_eq!(content.content_type, TableCellContentType::Field);
+    assert_eq!(content.field_handle, Some(acadrust::Handle::new(0x30)));
+    assert_eq!(content.value.text, "shown");
+}
+
+/// The fields a table's cells show are listed with the table in an R2010+ DWG, also when the table came from a DXF (no list).
+#[test]
+fn the_fields_of_the_cells_are_listed_in_an_r2010_dwg() {
+    use acadrust::entities::table::{CellContent, TableCellContentType};
+    let mut table = Table::new(Vector3::ZERO, 1, 1);
+    let mut content = CellContent::new();
+    content.content_type = TableCellContentType::Field;
+    content.field_handle = Some(acadrust::Handle::new(0x30));
+    table.rows[0].cells[0].contents = vec![content];
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    doc.add_entity(EntityType::Table(Box::new(table))).unwrap();
+    let dwg = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+        .read()
+        .unwrap();
+    assert_eq!(table_of(&dwg).field_handles, [acadrust::Handle::new(0x30)]);
+}

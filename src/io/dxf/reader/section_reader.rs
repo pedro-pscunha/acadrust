@@ -20665,7 +20665,10 @@ impl<'a> SectionReader<'a> {
                     if let Some(c) = cur.as_mut() {
                         ensure_content(c);
                         let content = c.contents.last_mut().unwrap();
-                        content.content_type = TableCellContentType::Value;
+                        // Text beside a field or a block (a cached value) does not make the content a value.
+                        if content.field_handle.is_none() && content.block_handle.is_none() {
+                            content.content_type = TableCellContentType::Value;
+                        }
                         content.value.text.push_str(&pair.value_string);
                         if content.value.value_type == CellValueType::Unknown {
                             content.value.value_type = CellValueType::String;
@@ -20902,7 +20905,10 @@ impl<'a> SectionReader<'a> {
                     if let Some(c) = cur.as_mut() {
                         ensure_content(c);
                         let content = c.contents.last_mut().unwrap();
-                        content.content_type = TableCellContentType::Value;
+                        // Text beside a field or a block (a cached value) does not make the content a value.
+                        if content.field_handle.is_none() && content.block_handle.is_none() {
+                            content.content_type = TableCellContentType::Value;
+                        }
                         let value = &mut content.value;
                         if !in_value || (value.flags & 1) == 0 {
                             value.text.push_str(&pair.value_string);
