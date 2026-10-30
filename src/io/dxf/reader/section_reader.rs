@@ -18191,12 +18191,11 @@ impl<'a> SectionReader<'a> {
         );
         // Group 68 says whether the viewport is on (0 = off); group 90 bit
         // 0x8000 is only "always enabled", which some writers leave clear.
-        // Explicit off already controls visibility; retain its independent
-        // stored enable bit rather than discarding it during readback.
-        if !vp.status.is_off {
-            if let Some(status) = status_field {
-                vp.status.is_on = status != 0;
-            }
+        // A non-zero group 68 sets the bit; a zero never clears the bit group
+        // 90 set (AutoCAD's DXFOUT writes 68 = 0 with the bit on, and keeps it).
+        // Explicit off already controls visibility.
+        if !vp.status.is_off && status_field.is_some_and(|status| status != 0) {
+            vp.status.is_on = true;
         }
         vp.dxf_status = status_field.filter(|value| *value != vp.id);
 
