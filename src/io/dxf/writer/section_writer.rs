@@ -12662,7 +12662,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     self.writer.write_bool(visibility_code, !border.invisible)?;
                 }
             }
-        } else if let Some(ref style) = cell.style {
+        } else if let Some(style) = cell.style.as_ref().filter(|s| !s.modern_override_bits) {
             if !style.text_style_name.is_empty() {
                 self.writer.write_string(7, &style.text_style_name)?;
             }

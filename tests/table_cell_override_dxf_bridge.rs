@@ -46,3 +46,35 @@ fn the_overrides_of_an_r2010_cell_style_are_written_as_dxf_override_groups() {
     assert!(groups.contains(&("170", "5")), "alignment: {groups:?}");
     assert!(groups.contains(&("64", "2")), "content colour: {groups:?}");
 }
+
+/// A style read from an R2010+ DWG that overrides nothing writes no override groups: the "every property" form is for a style made
+/// without override flags.
+#[test]
+fn an_r2010_cell_style_without_overrides_writes_no_override_groups() {
+    let mut table = Table::new(Vector3::ZERO, 1, 1);
+    table.set_cell_text(0, 0, "x");
+    let mut style = CellStyle::new();
+    style.modern_override_bits = true;
+    table.rows[0].cells[0].style = Some(style);
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    doc.add_entity(EntityType::Table(Box::new(table))).unwrap();
+    let text = String::from_utf8(DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<(&str, &str)> = lines
+        .chunks(2)
+        .filter(|p| p.len() == 2)
+        .map(|p| (p[0], p[1]))
+        .collect();
+    let table = pairs
+        .iter()
+        .position(|p| *p == ("0", "ACAD_TABLE"))
+        .unwrap();
+    let end = table + pairs[table + 1..].iter().position(|p| p.0 == "0").unwrap() + 1;
+    let record = &pairs[table..end];
+    for code in ["170", "63", "64", "69", "279", "289"] {
+        assert!(
+            record.iter().all(|p| p.0 != code),
+            "group {code}: {record:?}"
+        );
+    }
+}
