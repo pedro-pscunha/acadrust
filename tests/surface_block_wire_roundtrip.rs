@@ -132,3 +132,57 @@ fn surface_bridge_roundtrip_keeps_wireframe_data() {
     );
     assert_eq!(actual.acis_data.sab_data, source.acis_data.sab_data);
 }
+
+#[test]
+fn private_surface_cache_keeps_revision_material_references_and_xdata() {
+    use acadrust::entities::solid3d::{AcisMaterial, Silhouette};
+    use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+    use acadrust::Handle;
+    let mut document = CadDocument::with_version(DxfVersion::AC1032);
+    let mut source = with_wires();
+    source.acis_data.revision.has_guid = true;
+    source.acis_data.revision.major = 12345;
+    source.acis_data.revision.bytes = [1, 2, 3, 4, 5, 6, 7, 8];
+    source.acis_data.materials.push(AcisMaterial {
+        array_index: 3,
+        absolute_reference: 4,
+        material_handle: Some(Handle::new(0xF00)),
+    });
+    source.silhouettes.push(Silhouette::new(55));
+    let mut xdata = ExtendedDataRecord::new("ACME");
+    xdata
+        .values
+        .push(XDataValue::String("surface-user-data".into()));
+    source.common.extended_data.add_record(xdata);
+    let handle = document
+        .add_entity(EntityType::Surface(Box::new(source.clone())))
+        .unwrap();
+    let mut public = Vec::new();
+    DxfWriter::new(&document)
+        .write_to_writer(&mut public)
+        .unwrap();
+    assert!(!String::from_utf8(public)
+        .unwrap()
+        .contains("AcDbAcadrustSurfaceCache"));
+    let mut bridge = Vec::new();
+    DxfWriter::new(&document)
+        .for_dwg_bridge()
+        .write_to_writer(&mut bridge)
+        .unwrap();
+    let bridge = String::from_utf8(bridge).unwrap().replace("F00", "F01");
+    let restored = DxfReader::from_reader(Cursor::new(bridge.into_bytes()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let Some(EntityType::Surface(actual)) = restored.get_entity(handle) else {
+        panic!("surface missing after bridge roundtrip");
+    };
+    assert_eq!(actual.acis_data.revision, source.acis_data.revision);
+    assert_eq!(
+        actual.acis_data.materials[0].material_handle,
+        Some(Handle::new(0xF01))
+    );
+    assert_eq!(actual.acis_data.materials[0].array_index, 3);
+    assert_eq!(actual.silhouettes, source.silhouettes);
+    assert_eq!(actual.common.extended_data, source.common.extended_data);
+}

@@ -11794,6 +11794,20 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 self.writer.write_point3d(13, *v_vector2)?;
             }
         }
+        if self.dwg_bridge {
+            self.writer.write_subclass(crate::io::surface_cache::SUBCLASS)?;
+            let data =
+                crate::io::dwg::dwg_stream_writers::object_writer::DwgObjectWriter::surface_cache(
+                    surface,
+                )?;
+            for chunk in data.chunks(127) {
+                self.writer.write_binary(310, chunk)?;
+            }
+            for material in &surface.acis_data.materials {
+                self.writer
+                    .write_handle(340, material.material_handle.unwrap_or(Handle::NULL))?;
+            }
+        }
         Ok(())
     }
 

@@ -14,6 +14,7 @@ mod loft_parameters;
 mod loft_surface_curves;
 pub mod read;
 pub mod recover;
+mod surface_cache;
 mod surface_history;
 
 #[cfg(feature = "import")]

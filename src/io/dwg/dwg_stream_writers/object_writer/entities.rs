@@ -5244,6 +5244,36 @@ impl<'a> DwgObjectWriter<'a> {
         self.write_surface_matrix(&value.path_entity_transform);
     }
 
+    /// Encode only the native modeler cache, using one fixed layout for the private DXF bridge.
+    pub(crate) fn surface_cache(surface: &Surface) -> crate::error::Result<Vec<u8>> {
+        let document = crate::document::CadDocument::with_version(crate::types::DxfVersion::AC1032);
+        let mut writer = DwgObjectWriter::new(&document)?;
+        if writer.write_acis_wireframe(
+            surface.point_of_reference,
+            &surface.acis_data,
+            &surface.wires,
+            &surface.silhouettes,
+        ) {
+            writer.writer.write_bit(surface.acis_data.extra_acis_data.is_none());
+            writer.write_extra_acis_data(&surface.acis_data);
+        }
+        writer.write_acis_materials(&surface.acis_data, false);
+        writer.write_acis_revision(&surface.acis_data.revision);
+        let main = writer.writer.main();
+        let handles = writer.writer.handle_writer();
+        let mut data = Vec::new();
+        data.extend_from_slice(&(main.position_in_bits() as u64).to_le_bytes());
+        data.extend_from_slice(&(handles.position_in_bits() as u64).to_le_bytes());
+        data.extend(main.to_bytes_snapshot());
+        data.extend(handles.to_bytes_snapshot());
+        if data.len() > crate::io::surface_cache::MAX_BYTES {
+            return Err(crate::error::DxfError::Parse(
+                "Private surface cache exceeds the bridge byte limit".into(),
+            ));
+        }
+        Ok(data)
+    }
+
     fn write_surface(&mut self, e: &Surface) {
         self.pending_has_ds_data = self.needs_acds_section() && e.acis_data.contributes_sab();
         let type_code = self.class_type_code(e.kind.dxf_name(), common::OBJ_SURFACE);
@@ -5251,7 +5281,10 @@ impl<'a> DwgObjectWriter<'a> {
 
         let acds = self.needs_acds_section();
         let tail_written = if acds {
-            self.write_acis_empty(&e.acis_data);
+            if self.write_acis_wireframe(e.point_of_reference, &e.acis_data, &e.wires, &e.silhouettes) {
+                self.writer.write_bit(e.acis_data.extra_acis_data.is_none());
+                self.write_extra_acis_data(&e.acis_data);
+            }
             self.queue_sab_entry(&e.acis_data, e.common.handle);
             false
         } else {
