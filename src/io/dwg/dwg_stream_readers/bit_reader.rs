@@ -24,6 +24,8 @@ use std::sync::Arc;
 /// - `last_byte`: The most recently read byte from the stream
 #[derive(Clone)]
 pub struct DwgBitReader {
+    /// The ACI index the last entity colour held beside its true colour (see [`Self::read_en_color`]).
+    pub(crate) color_fallback: Option<u8>,
     /// Source data buffer.
     data: Arc<[u8]>,
     /// Current stream byte position (points past the last byte read via advance_byte).
@@ -62,6 +64,7 @@ impl DwgBitReader {
     /// sharing avoids three full record copies per cursor set.
     pub fn from_shared(data: Arc<[u8]>, version: DwgVersion, dxf_version: DxfVersion) -> Self {
         Self {
+            color_fallback: None,
             end_bit: (data.len() as i64).saturating_mul(8),
             error: std::sync::OnceLock::new(),
             data,
@@ -1038,6 +1041,7 @@ impl DwgBitReader {
         let word = word as u16;
         let has_book = word & 0x4000 != 0;
         let has_rgb = word & 0x8000 != 0 && !has_book;
+        self.color_fallback = None;
         let color = if has_rgb {
             let packed = self.read_bit_long() as u32;
             match packed >> 24 {
@@ -1045,7 +1049,11 @@ impl DwgBitReader {
                 0xC1 => Color::ByBlock,
                 0xC3 => Color::from_index((packed & 0xFF) as i16),
                 0xC8 => Color::None,
-                _ => Color::from_true_color_value(packed as i32),
+                _ => {
+                    // The index bits of the word, beside the true colour, are the colour a reader without true colour shows.
+                    self.color_fallback = u8::try_from(word & 0x1FFF).ok().filter(|index| *index != 0);
+                    Color::from_true_color_value(packed as i32)
+                }
             }
         } else {
             Color::from_index((word & 0x1FFF) as i16)

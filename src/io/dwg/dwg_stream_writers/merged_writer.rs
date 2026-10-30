@@ -319,6 +319,10 @@ impl DwgMergedWriter {
         self.main.write_cm_true_color(color);
     }
 
+    pub fn set_color_fallback(&mut self, index: Option<u8>) {
+        self.main.set_color_fallback(index);
+    }
+
     pub fn write_en_color(&mut self, color: &Color, transparency: &Transparency) {
         self.main.write_en_color(color, transparency);
     }

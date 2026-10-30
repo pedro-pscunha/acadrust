@@ -8898,6 +8898,7 @@ fn map_entity_common(
     // XDictionary handle
     common.xdictionary_handle = data.xdictionary_handle.map(Handle::from);
     common.color_book_handle = data.color_book_handle.map(Handle::from);
+    common.color_fallback = data.color_fallback;
     common.full_visual_style_handle = data.full_visual_style_handle.map(Handle::from);
     common.face_visual_style_handle = data.face_visual_style_handle.map(Handle::from);
     common.edge_visual_style_handle = data.edge_visual_style_handle.map(Handle::from);
@@ -9028,6 +9029,7 @@ mod layer_handle_tests {
             has_graphic: false,
             graphic_data: None,
             entity_mode: 2,
+            color_fallback: None,
             owner_handle: 0,
             reactors: Vec::new(),
             xdictionary_handle: None,

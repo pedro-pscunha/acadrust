@@ -21,6 +21,8 @@ use crate::types::{Color, DxfVersion, Vector2, Vector3};
 /// - `bit_shift`: Current bit offset within the partial byte (0–7)
 /// - `last_byte`: Accumulator for the partial byte being built
 pub struct DwgBitWriter {
+    /// The ACI index for the true colour of the next entity colour written (see [`Self::set_color_fallback`]).
+    color_fallback: Option<u8>,
     /// Output buffer holding completed bytes.
     /// After seeking backward, buffer.len() may be > write_pos.
     buffer: Vec<u8>,
@@ -46,6 +48,7 @@ impl DwgBitWriter {
     /// Create a new bit writer for the given DWG version.
     pub fn new(version: DwgVersion, dxf_version: DxfVersion) -> Self {
         Self {
+            color_fallback: None,
             buffer: Vec::with_capacity(4096),
             write_pos: 0,
             bit_shift: 0,
@@ -714,12 +717,18 @@ impl DwgBitWriter {
     /// Write ODA §2.11 ENC, with the BL ordering observed in native AutoCAD
     /// probes (reC/a2004..a2018). Book colors carry an ACI fallback in the word
     /// and their RGB through a separate DBCOLOR handle, never an inline BL.
+    /// The ACI index the next entity colour writes beside its true colour; taken by that colour.
+    pub fn set_color_fallback(&mut self, index: Option<u8>) {
+        self.color_fallback = index;
+    }
+
     pub fn write_en_color_with_book(
         &mut self,
         color: &Color,
         transparency: &Transparency,
         is_book_color: bool,
     ) {
+        let fallback = self.color_fallback.take();
         if !self.version.supports_true_color() {
             self.write_bit_short(color.approximate_index());
             return;
@@ -734,7 +743,7 @@ impl DwgBitWriter {
         let mut word = if is_book_color {
             0xC000 | (color.approximate_index() as u16 & 0x1FFF)
         } else if packed_rgb.is_some() {
-            0x8000
+            0x8000 | u16::from(fallback.unwrap_or(0))
         } else {
             color.approximate_index() as u16 & 0x1FFF
         };

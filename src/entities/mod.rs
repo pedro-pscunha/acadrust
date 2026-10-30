@@ -481,6 +481,10 @@ pub struct EntityCommon {
     /// Transparency
     #[cfg_attr(feature = "serde", serde(default))]
     pub transparency: Transparency,
+    /// The ACI index stored next to a true colour (DXF 62 beside 420; the index bits of the DWG entity colour word): the colour a
+    /// reader without true colour shows. `None`: the nearest index to the RGB.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub color_fallback: Option<u8>,
     /// Named/color-book identity from DXF group code 430.
     #[cfg_attr(feature = "serde", serde(default))]
     pub color_name: Option<String>,
@@ -549,6 +553,16 @@ pub struct EntityCommon {
 }
 
 impl EntityCommon {
+    /// Set the colour from a DXF index (group 62). Beside a true colour that came first (420) the index is the fallback stored
+    /// with it.
+    pub(crate) fn set_index_color(&mut self, index: i16) {
+        let color = Color::from_index(index);
+        match (self.color, color) {
+            (Color::Rgb { .. }, Color::Index(index)) => self.color_fallback = Some(index),
+            _ => self.color = color,
+        }
+    }
+
     fn preserve_storage_data_from(&mut self, source: &Self) {
         self.graphic_data = source.graphic_data.clone();
         self.r12_metadata = source.r12_metadata.clone();
@@ -568,6 +582,7 @@ impl EntityCommon {
             linetype_handle: None,
             linetype_scale: 1.0,
             transparency: Transparency::BY_LAYER,
+            color_fallback: None,
             color_name: None,
             invisible: false,
             extended_data: crate::xdata::ExtendedData::new(),

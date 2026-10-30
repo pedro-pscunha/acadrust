@@ -64,6 +64,8 @@ pub struct EntityCommonData {
     pub graphic_data: Option<Vec<u8>>,
     /// Entity mode (0=owned, 1=paper, 2=model, 3=unused)
     pub entity_mode: u8,
+    /// The ACI index stored beside a true colour.
+    pub color_fallback: Option<u8>,
     /// Owner handle (only if entity_mode == 0)
     pub owner_handle: u64,
     /// Reactor handles
@@ -587,6 +589,7 @@ impl DwgObjectReader {
         } else {
             (reader.read_cm_color(), Transparency::default(), false)
         };
+        let color_fallback = reader.take_color_fallback();
 
         // R2004+: Color book color handle (hard pointer) — only if flagged
         let color_book_handle = if self.version.r2004_plus() && has_color_handle {
@@ -612,6 +615,7 @@ impl DwgObjectReader {
                 reactors,
                 xdictionary_handle,
                 color,
+                color_fallback,
                 transparency,
                 line_weight: 0,
                 linetype_scale,
@@ -708,6 +712,7 @@ impl DwgObjectReader {
             reactors,
             xdictionary_handle,
             color,
+            color_fallback,
             transparency,
             line_weight,
             linetype_scale,

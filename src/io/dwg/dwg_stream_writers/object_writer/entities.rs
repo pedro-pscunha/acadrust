@@ -258,6 +258,7 @@ impl<'a> DwgObjectWriter<'a> {
     // â”€â”€ Helper: write entity preamble â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fn entity_preamble(&mut self, type_code: i16, c: &EntityCommon) {
+        self.writer.set_color_fallback(c.color_fallback);
         self.write_common_entity_data(
             type_code,
             c.handle,

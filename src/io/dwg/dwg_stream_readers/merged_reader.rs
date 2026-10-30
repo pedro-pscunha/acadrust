@@ -447,6 +447,10 @@ impl DwgMergedReader {
     pub fn read_en_color(&mut self) -> (Color, crate::types::Transparency, bool) {
         self.main.read_en_color()
     }
+    /// The ACI index the colour last read by [`Self::read_en_color`] held beside its true colour.
+    pub fn take_color_fallback(&mut self) -> Option<u8> {
+        self.main.color_fallback.take()
+    }
     pub fn read_color_by_index(&mut self) -> Color {
         self.main.read_color_by_index()
     }

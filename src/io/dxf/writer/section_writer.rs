@@ -4567,7 +4567,13 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
         // Write color only if not ByLayer (default)
         if common.color != Color::ByLayer {
-            self.writer.write_color(62, common.color)?;
+            match (common.color, common.color_fallback) {
+                // The index stored beside the true colour, else the nearest one.
+                (Color::Rgb { .. }, Some(index)) if self.dxf_version >= DxfVersion::AC1018 => {
+                    self.writer.write_i16(62, i16::from(index))?
+                }
+                _ => self.writer.write_color(62, common.color)?,
+            }
         }
 
         // True color (code 420) — only for AC1018+ (ACAD 2004+)

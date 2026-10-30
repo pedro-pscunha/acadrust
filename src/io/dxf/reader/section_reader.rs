@@ -11976,7 +11976,7 @@ impl<'a> SectionReader<'a> {
             }
             62 => {
                 if let Some(index) = pair.as_i16() {
-                    common.color = Color::from_index(index);
+                    common.set_index_color(index);
                 }
                 Ok(true)
             }
@@ -12068,6 +12068,10 @@ impl<'a> SectionReader<'a> {
             // True color (code 420): packed 24-bit RGB overrides ACI index.
             420 => {
                 if let Some(v) = pair.as_i32_bits() {
+                    // The index group (62) read before it stays as the fallback beside the true colour.
+                    if let Color::Index(index) = common.color {
+                        common.color_fallback = Some(index);
+                    }
                     common.color = Color::from_true_color_value(v);
                 }
                 Ok(true)
@@ -12398,7 +12402,7 @@ impl<'a> SectionReader<'a> {
             match pair.code {
                 8 => common.layer = pair.value_string,
                 62 => {
-                    common.color = Color::from_index(pair.as_i16().unwrap_or(256));
+                    common.set_index_color(pair.as_i16().unwrap_or(256));
                 }
                 370 => {
                     if let Some(value) = pair.as_i16() {
@@ -12887,7 +12891,7 @@ impl<'a> SectionReader<'a> {
                 8 => point.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        point.common.color = Color::from_index(color_index);
+                        point.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -12946,7 +12950,7 @@ impl<'a> SectionReader<'a> {
                 8 => line.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        line.common.color = Color::from_index(color_index);
+                        line.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13003,7 +13007,7 @@ impl<'a> SectionReader<'a> {
                 8 => circle.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        circle.common.color = Color::from_index(color_index);
+                        circle.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13059,7 +13063,7 @@ impl<'a> SectionReader<'a> {
                 8 => arc.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        arc.common.color = Color::from_index(color_index);
+                        arc.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13126,7 +13130,7 @@ impl<'a> SectionReader<'a> {
                 8 => ellipse.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        ellipse.common.color = Color::from_index(color_index);
+                        ellipse.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13408,7 +13412,7 @@ impl<'a> SectionReader<'a> {
                     8 => common.layer = pair.value_string.clone(),
                     62 => {
                         if let Some(ci) = pair.as_i16() {
-                            common.color = Color::from_index(ci);
+                            common.set_index_color(ci);
                         }
                     }
                     370 => {
@@ -13623,7 +13627,7 @@ impl<'a> SectionReader<'a> {
                 8 => lwpolyline.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        lwpolyline.common.color = Color::from_index(color_index);
+                        lwpolyline.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13736,7 +13740,7 @@ impl<'a> SectionReader<'a> {
                 8 => text.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        text.common.color = Color::from_index(color_index);
+                        text.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -13853,7 +13857,7 @@ impl<'a> SectionReader<'a> {
                 8 => mtext.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        mtext.common.color = Color::from_index(color_index);
+                        mtext.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -14090,7 +14094,7 @@ impl<'a> SectionReader<'a> {
                 8 => spline.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        spline.common.color = Color::from_index(color_index);
+                        spline.common.set_index_color(color_index);
                     }
                 }
                 370 => {
@@ -14236,7 +14240,7 @@ impl<'a> SectionReader<'a> {
                 8 => helix.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(ci) = pair.as_i16() {
-                        helix.common.color = Color::from_index(ci);
+                        helix.common.set_index_color(ci);
                     }
                 }
                 370 => {
@@ -14727,7 +14731,7 @@ impl<'a> SectionReader<'a> {
             8 => common.layer = pair.value_string.clone(),
             62 => {
                 if let Some(value) = pair.as_i16() {
-                    common.color = Color::from_index(value);
+                    common.set_index_color(value);
                 }
             }
             370 => {
@@ -17451,7 +17455,7 @@ impl<'a> SectionReader<'a> {
                 8 => tolerance.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        tolerance.common.color = Color::from_index(color_index);
+                        tolerance.common.set_index_color(color_index);
                     }
                 }
                 1 => tolerance.text = pair.value_string.clone(),
@@ -17496,7 +17500,7 @@ impl<'a> SectionReader<'a> {
                 8 => shape.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        shape.common.color = Color::from_index(color_index);
+                        shape.common.set_index_color(color_index);
                     }
                 }
                 2 => shape.shape_name = pair.value_string.clone(),
@@ -17567,7 +17571,7 @@ impl<'a> SectionReader<'a> {
                 8 => wipeout.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(color_index) = pair.as_i16() {
-                        wipeout.common.color = Color::from_index(color_index);
+                        wipeout.common.set_index_color(color_index);
                     }
                 }
                 10 | 20 | 30 => {
@@ -17910,7 +17914,7 @@ impl<'a> SectionReader<'a> {
                 8 => vp.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        vp.common.color = Color::from_index(v);
+                        vp.common.set_index_color(v);
                     }
                 }
                 10 | 20 | 30 => {
@@ -18191,7 +18195,7 @@ impl<'a> SectionReader<'a> {
                 }
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        attrib.common.color = Color::from_index(v);
+                        attrib.common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -18341,7 +18345,7 @@ impl<'a> SectionReader<'a> {
                 8 => leader.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        leader.common.color = Color::from_index(v);
+                        leader.common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -18492,7 +18496,7 @@ impl<'a> SectionReader<'a> {
                 8 => ml.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        ml.common.color = Color::from_index(v);
+                        ml.common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -19321,7 +19325,7 @@ impl<'a> SectionReader<'a> {
                 8 => mline.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        mline.common.color = Color::from_index(v);
+                        mline.common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -19511,7 +19515,7 @@ impl<'a> SectionReader<'a> {
                 8 => mesh.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        mesh.common.color = Color::from_index(v);
+                        mesh.common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -19649,7 +19653,7 @@ impl<'a> SectionReader<'a> {
                 8 => img.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        img.common.color = Color::from_index(v);
+                        img.common.set_index_color(v);
                     }
                 }
                 10 | 20 | 30 => {
@@ -19768,7 +19772,7 @@ impl<'a> SectionReader<'a> {
                 8 => common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        common.color = Color::from_index(v);
+                        common.set_index_color(v);
                     }
                 }
                 370 => {
@@ -20620,7 +20624,7 @@ impl<'a> SectionReader<'a> {
                 8 => table.common.layer = pair.value_string.clone(),
                 62 if cur.is_none() => {
                     if let Some(v) = pair.as_i16() {
-                        table.common.color = Color::from_index(v);
+                        table.common.set_index_color(v);
                     }
                 }
                 370 if cur.is_none() => {
@@ -21290,7 +21294,7 @@ impl<'a> SectionReader<'a> {
                 8 => underlay.common.layer = pair.value_string.clone(),
                 62 => {
                     if let Some(v) = pair.as_i16() {
-                        underlay.common.color = Color::from_index(v);
+                        underlay.common.set_index_color(v);
                     }
                 }
                 370 => {
