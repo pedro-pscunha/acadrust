@@ -5501,6 +5501,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     ) -> Result<()> {
         self.write_common_entity_data(&base.common, owner)?;
         self.writer.write_subclass("AcDbDimension")?;
+        // The release the groups are for: a DWG bridge carries what the DWG of its document holds.
+        let release = if self.dwg_bridge && self.document_version != DxfVersion::Unknown {
+            self.document_version
+        } else {
+            self.dxf_version
+        };
+        // The dimension version (R2010 and later; the DWG holds it as a byte after the same release).
+        if release >= DxfVersion::AC1024 {
+            self.writer.write_i16(280, i16::from(base.version))?;
+        }
         // Omit an absent geometry cache so the CAD host can regenerate it.
         // An explicit empty group 2 is an invalid block-table reference.
         if !base.block_name.is_empty() {
@@ -5530,6 +5540,12 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         }
         self.writer.write_i16(71, base.attachment_point as i16)?;
         self.writer.write_i16(72, base.line_spacing_style)?;
+        // R2007 and later: group 73 (undocumented) and the flipped arrows 74 and 75.
+        if release >= DxfVersion::AC1021 {
+            self.writer.write_i16(73, i16::from(base.dwg_unknown_bit))?;
+            self.writer.write_i16(74, i16::from(base.flip_arrow1))?;
+            self.writer.write_i16(75, i16::from(base.flip_arrow2))?;
+        }
         self.writer.write_string(3, &base.style_name)?;
         if let Some(text) = base.text_override() {
             self.writer.write_string(1, text)?;

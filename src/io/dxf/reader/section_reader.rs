@@ -15876,6 +15876,12 @@ impl<'a> SectionReader<'a> {
         let mut line_spacing_factor = 1.0f64;
         let mut line_spacing_style = 1i16;
         let mut attachment_point = AttachmentPointType::MiddleCenter;
+        // Group 280 (the dimension version, R2010 and later) and the R2007 groups 73 (undocumented), 74 and 75 (the flipped arrows),
+        // which the DWG holds beside the attachment point and the line spacing.
+        let mut dimension_version = 0u8;
+        let mut dwg_unknown_bit = false;
+        let mut flip_arrow1 = false;
+        let mut flip_arrow2 = false;
         let mut normal = PointReader::new();
         let mut common = EntityCommon::new();
 
@@ -15984,6 +15990,10 @@ impl<'a> SectionReader<'a> {
                     };
                 }
                 72 => line_spacing_style = pair.as_i16().unwrap_or(1),
+                280 => dimension_version = u8::try_from(pair.as_i16().unwrap_or(0)).unwrap_or(0),
+                73 => dwg_unknown_bit = pair.as_i16().unwrap_or(0) != 0,
+                74 => flip_arrow1 = pair.as_i16().unwrap_or(0) != 0,
+                75 => flip_arrow2 = pair.as_i16().unwrap_or(0) != 0,
                 42 => {
                     if let Some(measurement) = pair.as_double() {
                         actual_measurement = Some(measurement);
@@ -16156,6 +16166,10 @@ impl<'a> SectionReader<'a> {
             if line_spacing_factor != 1.0 {
                 dc.line_spacing_factor = line_spacing_factor;
             }
+            dc.version = dimension_version;
+            dc.dwg_unknown_bit = dwg_unknown_bit;
+            dc.flip_arrow1 = flip_arrow1;
+            dc.flip_arrow2 = flip_arrow2;
             if let Some(n) = normal.get_point() {
                 dc.normal = n;
             }
