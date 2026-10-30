@@ -165,3 +165,20 @@ fn a_table_with_the_default_short_has_no_value_flags_after_a_dwg() {
     let table = table_of(&dwg);
     assert_eq!((table.value_flags, table.dwg_unknown_short), (0, 38));
 }
+
+/// The DXF cell flag (group 91) is not the geometry flag of the R2010+ cell: a cell with a flag writes the same DWG as one without.
+#[test]
+fn the_dxf_cell_flag_does_not_set_the_r2010_geometry_flag() {
+    for version in [DxfVersion::AC1024, DxfVersion::AC1027, DxfVersion::AC1032] {
+        let dwg = |flag: i32| {
+            let mut table = Table::new(Vector3::ZERO, 1, 2);
+            table.set_cell_text(0, 0, "a");
+            table.set_cell_text(0, 1, "b");
+            table.rows[0].cells[1].flag = flag;
+            let mut doc = CadDocument::with_version(version);
+            doc.add_entity(EntityType::Table(Box::new(table))).unwrap();
+            DwgWriter::write_to_vec(&doc).unwrap()
+        };
+        assert_eq!(dwg(0), dwg(5), "{version:?}");
+    }
+}

@@ -3520,8 +3520,7 @@ impl<'a> DwgObjectWriter<'a> {
             || cell.geometry_data_flag != 0
             || cell.geometry_width_with_gap != 0.0
             || cell.geometry_height_with_gap != 0.0
-            || cell.geometry_flags != 0
-            || cell.flag != 0;
+            || cell.geometry_flags != 0;
         self.writer.write_bit_long(has_geometry as i32);
         if has_geometry {
             self.writer.write_bit_long(cell.geometry_data_flag);
