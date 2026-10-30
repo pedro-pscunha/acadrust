@@ -3963,6 +3963,10 @@ impl<'a> SectionReader<'a> {
                         // Keep the structural marker in the entity store so its common
                         // data (including XDATA) is available to both format writers.
                         document.add_loaded_entity(EntityType::Block(block));
+                        // ... and the end marker, whose layer is its own.
+                        if !block_end.common.handle.is_null() {
+                            document.add_loaded_entity(EntityType::BlockEnd(block_end));
+                        }
 
                         // Block and BlockEnd remain structural markers, excluded
                         // from normal entity iteration and block membership.

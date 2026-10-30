@@ -2896,7 +2896,16 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if is_paper_space {
             self.writer.write_i16(67, 1)?;
         }
-        self.writer.write_string(8, "0")?;
+        // The end marker has a layer of its own.
+        let layer = document
+            .entity_index
+            .get(&block_record.block_end_handle)
+            .and_then(|&idx| match document.entities[idx].as_ref() {
+                EntityType::BlockEnd(end) => Some(end.common.layer.as_str()),
+                _ => None,
+            })
+            .unwrap_or("0");
+        self.writer.write_string(8, layer)?;
         self.writer.write_subclass("AcDbBlockEnd")?;
 
         Ok(())
