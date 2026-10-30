@@ -2050,16 +2050,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         self.write_common_table_data(style.handle(), owner, document)?;
         self.writer.write_subclass("AcDbSymbolTableRecord")?;
         self.writer.write_subclass("AcDbTextStyleTableRecord")?;
-        // Shape files have an empty DXF STYLE name; SHAPE resolves group 2
-        // by searching the shape files, not a text-style name.
-        self.writer.write_string(
-            2,
-            if style.is_shape_file {
-                ""
-            } else {
-                style.name()
-            },
-        )?;
+        // A shape-file style keeps the name the file gave it (AutoCAD writes the ones it makes with an empty name, and an empty name
+        // stays empty).
+        self.writer.write_string(2, style.name())?;
         let mut flags: i16 = 0;
         if style.is_shape_file {
             flags |= 0x01;

@@ -52,7 +52,7 @@ fn history_header_uses_versioned_byte_codes() {
 }
 
 #[test]
-fn shape_file_style_has_no_dxf_name() {
+fn shape_file_style_keeps_its_name_in_a_dxf() {
     let mut doc = CadDocument::new();
     let mut style = TextStyle::new("SHAPES");
     style.handle = doc.allocate_handle();
@@ -69,7 +69,7 @@ fn shape_file_style_has_no_dxf_name() {
         .rev()
         .find(|pair| pair.0 == 2)
         .unwrap();
-    assert_eq!(name.1, "");
+    assert_eq!(name.1, "SHAPES");
 }
 
 #[test]

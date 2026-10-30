@@ -35,3 +35,42 @@ fn a_named_shape_style_and_the_unnamed_one_keep_their_fields_through_a_dwg() {
         .unwrap();
     assert_eq!(fields(&back), want);
 }
+
+/// The DXF writer keeps the name of a shape-file style as the file gave it: a named one stays named, an unnamed one stays unnamed.
+#[test]
+fn a_shape_style_keeps_its_name_in_a_dxf() {
+    let doc = DxfReader::from_reader(Cursor::new(SOURCE.as_bytes().to_vec()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let text = String::from_utf8(acadrust::DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<(&str, &str)> = lines
+        .chunks(2)
+        .filter(|p| p.len() == 2)
+        .map(|p| (p[0], p[1]))
+        .collect();
+    let mut shape_names = Vec::new();
+    for (i, p) in pairs.iter().enumerate() {
+        if *p == ("0", "STYLE") {
+            let record: Vec<&(&str, &str)> =
+                pairs[i + 1..].iter().take_while(|q| q.0 != "0").collect();
+            let flags: i16 = record
+                .iter()
+                .find(|q| q.0 == "70")
+                .and_then(|q| q.1.parse().ok())
+                .unwrap_or(0);
+            if flags & 1 != 0 {
+                shape_names.push(
+                    record
+                        .iter()
+                        .find(|q| q.0 == "2")
+                        .map(|q| q.1.to_string())
+                        .unwrap_or_default(),
+                );
+            }
+        }
+    }
+    shape_names.sort();
+    assert_eq!(shape_names, ["".to_string(), "SourceShapes".to_string()]);
+}
