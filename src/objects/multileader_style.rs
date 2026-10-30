@@ -373,12 +373,12 @@ pub struct MultiLeaderStyle {
     /// Owner handle.
     pub owner_handle: Handle,
 
-    /// Style name.
-    /// DXF code: 3
+    /// Style name: the key of the style's entry in the ACAD_MLEADERSTYLE dictionary. It is not a
+    /// group of the record.
     pub name: String,
 
     /// Style description.
-    /// DXF code: 300
+    /// DXF code: 3
     pub description: String,
 
     // ========== Leader Line Properties ==========
@@ -478,7 +478,7 @@ pub struct MultiLeaderStyle {
     pub text_always_left: bool,
 
     /// Default text contents.
-    /// DXF code: 304
+    /// DXF code: 300
     pub default_text: String,
 
     // ========== Block Properties ==========

@@ -21753,8 +21753,119 @@ impl<'a> SectionReader<'a> {
                         style.owner_handle = Handle::new(h);
                     }
                 }
-                3 => style.name = pair.value_string.clone(),
-                300 => style.description = pair.value_string.clone(),
+                // Group 3 is the style description (the DWG field of that name); the name of the
+                // style is the key of its entry in the ACAD_MLEADERSTYLE dictionary.
+                3 => style.description = pair.value_string.clone(),
+                // Group 300 is the default MText contents.
+                300 | 304 => style.default_text = pair.value_string.clone(),
+                171 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.multileader_draw_order =
+                            crate::objects::MultiLeaderDrawOrderType::from(v);
+                    }
+                }
+                172 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.leader_draw_order = crate::objects::LeaderDrawOrderType::from(v);
+                    }
+                }
+                90 => {
+                    if let Some(v) = pair.as_i32() {
+                        style.max_leader_points = v;
+                    }
+                }
+                40 => {
+                    if let Some(v) = pair.as_double() {
+                        style.first_segment_angle = v;
+                    }
+                }
+                41 => {
+                    if let Some(v) = pair.as_double() {
+                        style.second_segment_angle = v;
+                    }
+                }
+                46 => {
+                    if let Some(v) = pair.as_double() {
+                        style.align_space = v;
+                    }
+                }
+                47 => {
+                    if let Some(v) = pair.as_double() {
+                        style.block_content_scale_x = v;
+                    }
+                }
+                49 => {
+                    if let Some(v) = pair.as_double() {
+                        style.block_content_scale_y = v;
+                    }
+                }
+                140 => {
+                    if let Some(v) = pair.as_double() {
+                        style.block_content_scale_z = v;
+                    }
+                }
+                141 => {
+                    if let Some(v) = pair.as_double() {
+                        style.block_content_rotation = v;
+                    }
+                }
+                143 => {
+                    if let Some(v) = pair.as_double() {
+                        style.break_gap_size = v;
+                    }
+                }
+                94 => {
+                    if let Some(v) = true_color_bits(&pair.value_string) {
+                        style.block_content_color = color_from_i32(v);
+                    }
+                }
+                177 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.block_content_connection =
+                            crate::objects::BlockContentConnectionType::from(v);
+                    }
+                }
+                271 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.text_attachment_direction =
+                            crate::objects::TextAttachmentDirectionType::from(v);
+                    }
+                }
+                272 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.text_bottom_attachment = crate::objects::TextAttachmentType::from(v);
+                    }
+                }
+                273 => {
+                    if let Some(v) = pair.as_i16() {
+                        style.text_top_attachment = crate::objects::TextAttachmentType::from(v);
+                    }
+                }
+                293 => {
+                    if let Some(v) = pair.as_bool() {
+                        style.enable_block_scale = v;
+                    }
+                }
+                294 => {
+                    if let Some(v) = pair.as_bool() {
+                        style.enable_block_rotation = v;
+                    }
+                }
+                295 => {
+                    if let Some(v) = pair.as_bool() {
+                        style.property_changed = v;
+                    }
+                }
+                297 => {
+                    if let Some(v) = pair.as_bool() {
+                        style.text_always_left = v;
+                    }
+                }
+                298 => {
+                    if let Some(v) = pair.as_bool() {
+                        style.unknown_flag_298 = v;
+                    }
+                }
                 170 => {
                     if let Some(v) = pair.as_i16() {
                         style.content_type = crate::objects::LeaderContentType::from(v);
@@ -21766,8 +21877,8 @@ impl<'a> SectionReader<'a> {
                     }
                 }
                 91 => {
-                    if let Some(v) = pair.as_i32() {
-                        style.line_color = Color::from_index(v as i16);
+                    if let Some(v) = true_color_bits(&pair.value_string) {
+                        style.line_color = color_from_i32(v);
                     }
                 }
                 92 => {
@@ -21806,8 +21917,8 @@ impl<'a> SectionReader<'a> {
                     }
                 }
                 93 => {
-                    if let Some(v) = pair.as_i32() {
-                        style.text_color = Color::from_index(v as i16);
+                    if let Some(v) = true_color_bits(&pair.value_string) {
+                        style.text_color = color_from_i32(v);
                     }
                 }
                 292 => {
@@ -21840,7 +21951,6 @@ impl<'a> SectionReader<'a> {
                         style.scale_factor = v;
                     }
                 }
-                304 => style.default_text = pair.value_string.clone(),
                 340 => {
                     if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
                         style.line_type_handle = Some(Handle::new(h));
