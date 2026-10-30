@@ -12890,9 +12890,10 @@ impl<'a> SectionReader<'a> {
                         point.thickness = thickness;
                     }
                 }
+                // DXF stores the angle in degrees; the entity holds radians, as the DWG does.
                 50 => {
                     if let Some(a) = pair.as_double() {
-                        point.x_axis_angle = a;
+                        point.x_axis_angle = a.to_radians();
                     }
                 }
                 210 | 220 | 230 => {
