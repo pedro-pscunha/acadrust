@@ -726,6 +726,9 @@ impl Default for TableStyle {
     }
 }
 
+/// The merge flag of the Table cell style of an R2010+ table style for a flow from the bottom up.
+pub(crate) const TABLE_FLOW_UP: i32 = 0x10000;
+
 const CELL_STYLE_MAP_KEY: &str = "ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP";
 const ROUNDTRIP_RECORD_KEY: &str = "ACAD_XREC_ROUNDTRIP";
 const PRE2007_MARKER: &str = "ACAD_ROUNDTRIP_PRE2007_TABLESTYLE";

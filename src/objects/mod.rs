@@ -113,7 +113,9 @@ pub use stub_objects::{
     RasterVariables, SpatialFilter, StubObject, VisualStyle, VisualStyleProperty,
     VisualStylePropertyValue, WipeoutVariables,
 };
-pub(crate) use table_style::{restore_table_style_roundtrip, store_table_style_roundtrip};
+pub(crate) use table_style::{
+    restore_table_style_roundtrip, store_table_style_roundtrip, TABLE_FLOW_UP,
+};
 pub use table_style::{
     CellAlignment, NamedTableCellStyle, RowCellStyle, TableBorderPropertyFlags, TableBorderType,
     TableCellBorder, TableCellStyleData, TableCellStylePropertyFlags, TableContentFormat,

@@ -1192,12 +1192,16 @@ impl<'a> DwgObjectWriter<'a> {
                 value.modern_cell_style_handle.value(),
             );
             if let Some(style) = &value.modern_style {
+                // The flow direction is a bit of the Table cell style's merge flags.
+                let mut style = style.clone();
+                style.cell_style.merge_flags = (style.cell_style.merge_flags & !TABLE_FLOW_UP)
+                    | if value.flow_direction == TableFlowDirection::Up { TABLE_FLOW_UP } else { 0 };
                 // The base "Table" style normally has no text style and keeps
                 // none; only a dangling one is resolved.
                 if style.cell_style.content_format.text_style.is_null() {
-                    self.write_named_table_cell_style(style);
+                    self.write_named_table_cell_style(&style);
                 } else {
-                    self.write_table_style_named_cell_style(style);
+                    self.write_table_style_named_cell_style(&style);
                 }
             } else {
                 self.write_default_modern_table_cell_style(value);
@@ -1328,6 +1332,7 @@ impl<'a> DwgObjectWriter<'a> {
         let cell_style = TableCellStyleData {
             style_type: 5,
             data_flags: 1,
+            merge_flags: if value.flow_direction == TableFlowDirection::Up { TABLE_FLOW_UP } else { 0 },
             background_color: Color::None,
             content_layout: 1,
             content_format: TableContentFormat {

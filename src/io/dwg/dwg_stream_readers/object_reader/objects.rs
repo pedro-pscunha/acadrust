@@ -7,6 +7,7 @@
 use super::safe_count;
 use crate::io::dwg::dwg_stream_readers::merged_reader::DwgMergedReader;
 use crate::io::dwg::dwg_version::DwgVersion;
+use crate::objects::TABLE_FLOW_UP;
 use crate::objects::{
     Material, MaterialColor, MaterialMap, MaterialProceduralValue, MaterialTexture,
     NamedTableCellStyle, ProxyObjectReference, ProxyReferenceKind, RowCellStyle,
@@ -467,6 +468,12 @@ pub fn read_table_style(reader: &mut DwgMergedReader, version: DwgVersion) -> Ta
     value.modern_unknown_long2 = reader.read_bit_long();
     value.modern_cell_style_handle = Handle::from(reader.read_handle());
     let modern_style = read_named_table_cell_style(reader);
+    // The Table cell style's merge flags hold the table property "flow direction bottom to top" (0x10000).
+    value.flow_direction = if modern_style.cell_style.merge_flags & TABLE_FLOW_UP != 0 {
+        crate::objects::TableFlowDirection::Up
+    } else {
+        crate::objects::TableFlowDirection::Down
+    };
     value.horizontal_margin = modern_style.cell_style.horizontal_margin;
     value.vertical_margin = modern_style.cell_style.vertical_margin;
     apply_cell_style_to_row(&mut value.data_row_style, &modern_style.cell_style);
