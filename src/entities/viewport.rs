@@ -406,7 +406,7 @@ impl Viewport {
             default_lighting_type: 1,
             brightness: 0.0,
             contrast: 0.0,
-            ambient_color: Color::from_index(0),
+            ambient_color: Color::ByLayer,
             custom_scale: 1.0,
         }
     }
