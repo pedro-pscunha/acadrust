@@ -2880,25 +2880,27 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.writing_paper_space = prev_ps;
         }
 
-        // Write ENDBLK entity
+        // Write ENDBLK entity: an entity with its own common data (layer, colour, linetype scale, lineweight), like the BLOCK.
         self.writer.write_string(0, "ENDBLK")?;
-        self.writer.write_handle(5, block_record.block_end_handle)?;
-        self.writer.write_handle(330, owner)?;
-        self.writer.write_subclass("AcDbEntity")?;
-        // Paper space flag for ENDBLK too
-        if is_paper_space {
-            self.writer.write_i16(67, 1)?;
-        }
-        // The end marker has a layer of its own.
-        let layer = document
+        let mut end_common = document
             .entity_index
             .get(&block_record.block_end_handle)
             .and_then(|&idx| match document.entities[idx].as_ref() {
-                EntityType::BlockEnd(end) => Some(end.common.layer.as_str()),
+                EntityType::BlockEnd(end) => Some(end.common.clone()),
                 _ => None,
             })
-            .unwrap_or("0");
-        self.writer.write_string(8, layer)?;
+            .unwrap_or_else(|| EntityCommon {
+                handle: block_record.block_end_handle,
+                owner_handle: owner,
+                ..Default::default()
+            });
+        end_common.handle = block_record.block_end_handle;
+        end_common.owner_handle = owner;
+        // Paper space flag for ENDBLK too
+        let was_paper_space = std::mem::replace(&mut self.writing_paper_space, is_paper_space);
+        let written = self.write_common_entity_data(&end_common, owner);
+        self.writing_paper_space = was_paper_space;
+        written?;
         self.writer.write_subclass("AcDbBlockEnd")?;
 
         Ok(())

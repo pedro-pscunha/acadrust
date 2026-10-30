@@ -4271,34 +4271,20 @@ impl<'a> SectionReader<'a> {
     fn read_block_end(&mut self) -> Result<BlockEnd> {
         use crate::entities::BlockEnd;
 
-        let mut block_end = BlockEnd::new();
-        let mut layer = String::from("0");
-        let mut handle = Handle::NULL;
+        // The end marker is an entity with its own common data: layer, colour, linetype scale, lineweight and the rest.
+        let mut common = EntityCommon::new();
 
         while let Some(pair) = self.reader.read_pair()? {
-            match pair.code {
-                0 => {
-                    // Next entity - push back and break
-                    self.reader.push_back(pair);
-                    break;
-                }
-                5 => {
-                    // Handle
-                    if let Ok(h) = u64::from_str_radix(&pair.value_string, 16) {
-                        handle = Handle::new(h);
-                    }
-                }
-                8 => {
-                    // Layer
-                    layer = pair.value_string.clone();
-                }
-                _ => {}
+            if pair.code == 0 {
+                // Next entity - push back and break
+                self.reader.push_back(pair);
+                break;
             }
+            self.try_read_common_entity_code(&pair, &mut common)?;
         }
 
-        block_end.common.handle = handle;
-        block_end.common.layer = layer;
-
+        let mut block_end = BlockEnd::new();
+        block_end.common = common;
         Ok(block_end)
     }
 
