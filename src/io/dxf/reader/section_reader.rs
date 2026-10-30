@@ -20669,17 +20669,20 @@ impl<'a> SectionReader<'a> {
                         table.table_style_handle = Some(Handle::new(h));
                     }
                 }
+                // An ASCII file types 280 to 289 as numbers, not booleans: read both.
                 280 if cur.is_none() && table.legacy_style_override.is_some() => {
-                    if let (Some(style), Some(value)) =
-                        (table.legacy_style_override.as_mut(), pair.as_bool())
-                    {
+                    if let (Some(style), Some(value)) = (
+                        table.legacy_style_override.as_mut(),
+                        pair.as_bool().or_else(|| pair.as_i16().map(|v| v != 0)),
+                    ) {
                         style.title_suppressed = Some(value);
                     }
                 }
                 281 if cur.is_none() => {
-                    if let (Some(style), Some(value)) =
-                        (table.legacy_style_override.as_mut(), pair.as_bool())
-                    {
+                    if let (Some(style), Some(value)) = (
+                        table.legacy_style_override.as_mut(),
+                        pair.as_bool().or_else(|| pair.as_i16().map(|v| v != 0)),
+                    ) {
                         style.header_suppressed = Some(value);
                     }
                 }
@@ -21125,9 +21128,10 @@ impl<'a> SectionReader<'a> {
                     }
                 }
                 283 if cur.is_none() => {
-                    if let (Some(style), Some(value)) =
-                        (table.legacy_style_override.as_mut(), pair.as_bool())
-                    {
+                    if let (Some(style), Some(value)) = (
+                        table.legacy_style_override.as_mut(),
+                        pair.as_bool().or_else(|| pair.as_i16().map(|v| v != 0)),
+                    ) {
                         style.row_fill_none.push(value);
                     }
                 }
