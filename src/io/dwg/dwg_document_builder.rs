@@ -4372,6 +4372,9 @@ impl DwgDocumentBuilder {
                     e.legacy_border_colors = data.legacy_border_colors;
                     e.legacy_border_line_weights = data.legacy_border_line_weights;
                     e.legacy_border_visibility = data.legacy_border_visibility;
+                    if self.obj_reader.version().r2010_plus() {
+                        e.derive_legacy_fields();
+                    }
                     let _ = document.add_entity(EntityType::Table(Box::new(e)));
                 }
                 OBJ_LWPOLYLINE => {

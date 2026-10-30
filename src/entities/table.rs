@@ -1117,6 +1117,61 @@ impl TableCell {
         std::borrow::Cow::Owned(cell)
     }
 
+    /// The cell as the R2010+ table content holds it: [`Self::binary_layout`], with the legacy rotation (DXF 145) and auto-fit (174)
+    /// as properties of the cell's content format. The R2010+ layout has no field for them (ODA specification 20.4.97), and the
+    /// content format has the rotation and the "auto scale" property. A cell without content has nowhere to hold them.
+    pub(crate) fn modern_layout(&self) -> std::borrow::Cow<'_, TableCell> {
+        let layout = self.binary_layout();
+        if (layout.rotation == 0.0 && !layout.auto_fit) || layout.contents.is_empty() {
+            return layout;
+        }
+        let mut cell = layout.into_owned();
+        let (rotation, auto_fit) = (cell.rotation, cell.auto_fit);
+        for content in &mut cell.contents {
+            if rotation != 0.0
+                && content.format_override_flags & CellStylePropertyFlags::ROTATION.bits() as i32
+                    == 0
+            {
+                content.rotation = rotation;
+                content.format_override_flags |= CellStylePropertyFlags::ROTATION.bits() as i32;
+            }
+            if auto_fit {
+                content.format_override_flags |= CellStylePropertyFlags::AUTO_SCALE.bits() as i32;
+                content.format_property_flags |= CellStylePropertyFlags::AUTO_SCALE.bits() as i32;
+            }
+        }
+        std::borrow::Cow::Owned(cell)
+    }
+
+    /// Set the legacy fields of a cell read from an R2010+ DWG from its content and style: the rotation (145) and auto-fit (174) of
+    /// its first content format, and the edges whose borders the cell style overrides (172). The virtual edge (178) is a way to
+    /// store a shared edge once in the pre-R2010 layout, which the R2010+ layout does not have.
+    pub(crate) fn derive_legacy_fields(&mut self) {
+        let rotation = CellStylePropertyFlags::ROTATION.bits() as i32;
+        let auto_scale = CellStylePropertyFlags::AUTO_SCALE.bits() as i32;
+        if let Some(content) = self.contents.first() {
+            if content.format_override_flags & rotation != 0 {
+                self.rotation = content.rotation;
+            }
+            self.auto_fit = content.format_override_flags & auto_scale != 0
+                && content.format_property_flags & auto_scale != 0;
+        }
+        if let Some(style) = &self.style {
+            let mut edges = 0u8;
+            for (edge, border) in [
+                (CellEdgeFlags::TOP, &style.top_border),
+                (CellEdgeFlags::RIGHT, &style.right_border),
+                (CellEdgeFlags::BOTTOM, &style.bottom_border),
+                (CellEdgeFlags::LEFT, &style.left_border),
+            ] {
+                if style.applied_border_edges.contains(edge) && !border.override_flags.is_empty() {
+                    edges |= edge.bits() as u8;
+                }
+            }
+            self.edge_flags = edges;
+        }
+    }
+
     pub fn set_text(&mut self, s: &str) {
         // Typed text keeps the content's format and is stored as a string
         // value with the flags the reference writes for typed text (6).
@@ -1697,7 +1752,105 @@ fn visit_table_cell_handles(value: &mut TableCell, visit: &mut impl FnMut(&mut H
     }
 }
 
+/// The bits of the legacy table-wide style override mask (DXF 93) that the R2010+ table content can hold.
+const LEGACY_FLOW: i32 = 0x4;
+const LEGACY_MARGIN_H: i32 = 0x8;
+const LEGACY_MARGIN_V: i32 = 0x10;
+
 impl Table {
+    /// The table value flags (DXF 90) as the R2010+ DWG holds them: the short after the table content (ODA specification 20.4.96.2,
+    /// where it is "unknown, default 38"; in the R2007 layout the same place holds the table value flags).
+    pub(crate) fn dwg_value_flags(&self) -> i16 {
+        if self.value_flags != 0 {
+            self.value_flags as i16
+        } else {
+            self.dwg_unknown_short
+        }
+    }
+
+    /// The table's base cell style with the legacy table-wide overrides of the flow direction (DXF 70 of the table overrides), the
+    /// horizontal margin (40) and the vertical margin (41) as its properties, which the R2010+ table content holds
+    /// (ODA specification 20.4.97: "the table's cell style override fields"). The other legacy overrides have no field there.
+    pub(crate) fn modern_base_style(&self) -> Option<std::borrow::Cow<'_, CellStyle>> {
+        let legacy = self.legacy_style_override.as_ref();
+        let flags = legacy.map_or(0, |l| l.flags);
+        if flags & (LEGACY_FLOW | LEGACY_MARGIN_H | LEGACY_MARGIN_V) == 0 {
+            return self.base_style.as_ref().map(std::borrow::Cow::Borrowed);
+        }
+        let legacy = legacy?;
+        let mut style = self.base_style.clone().unwrap_or_else(|| {
+            let mut style = CellStyle::new();
+            style.style_type = CellStyleType::Table;
+            style.modern_override_bits = true;
+            style
+        });
+        let up = CellStylePropertyFlags::FLOW_DIRECTION_BOTTOM_TO_TOP;
+        let overridden = style.overridden();
+        if flags & LEGACY_FLOW != 0 && !overridden.contains(up) {
+            style.override_flags |= up.bits() as i32;
+            if legacy.flow_direction == Some(1) {
+                style.property_flags |= up;
+            }
+        }
+        if flags & LEGACY_MARGIN_H != 0 {
+            let both = CellStylePropertyFlags::MARGIN_LEFT | CellStylePropertyFlags::MARGIN_RIGHT;
+            if !overridden.intersects(both) {
+                let value = legacy.horizontal_cell_margin.unwrap_or(0.0);
+                style.margin_left = value;
+                style.margin_right = value;
+                style.override_flags |= both.bits() as i32;
+                style.margin_override_flags |= 1;
+            }
+        }
+        if flags & LEGACY_MARGIN_V != 0 {
+            let both = CellStylePropertyFlags::MARGIN_TOP | CellStylePropertyFlags::MARGIN_BOTTOM;
+            if !overridden.intersects(both) {
+                let value = legacy.vertical_cell_margin.unwrap_or(0.0);
+                style.margin_top = value;
+                style.margin_bottom = value;
+                style.override_flags |= both.bits() as i32;
+                style.margin_override_flags |= 1;
+            }
+        }
+        Some(std::borrow::Cow::Owned(style))
+    }
+
+    /// Set the legacy fields of a table read from an R2010+ DWG from its content: the value flags (90), the flow direction and the
+    /// margins of the base cell style as the table-wide overrides (93), and the legacy fields of every cell.
+    pub(crate) fn derive_legacy_fields(&mut self) {
+        self.value_flags = i32::from(self.dwg_unknown_short);
+        if let Some(base) = &self.base_style {
+            let overridden = base.overridden();
+            let mut legacy = self.legacy_style_override.take().unwrap_or_default();
+            let up = CellStylePropertyFlags::FLOW_DIRECTION_BOTTOM_TO_TOP;
+            if overridden.contains(up) {
+                legacy.flags |= LEGACY_FLOW;
+                legacy.flow_direction = Some(i16::from(base.property_flags.contains(up)));
+            }
+            let h = CellStylePropertyFlags::MARGIN_LEFT | CellStylePropertyFlags::MARGIN_RIGHT;
+            if overridden.intersects(h) {
+                legacy.flags |= LEGACY_MARGIN_H;
+                legacy.horizontal_cell_margin = Some(base.margin_left);
+            }
+            let v = CellStylePropertyFlags::MARGIN_TOP | CellStylePropertyFlags::MARGIN_BOTTOM;
+            if overridden.intersects(v) {
+                legacy.flags |= LEGACY_MARGIN_V;
+                legacy.vertical_cell_margin = Some(base.margin_top);
+            }
+            if legacy.flags != 0 {
+                self.override_flag = true;
+                self.legacy_style_override = Some(legacy);
+            } else {
+                self.legacy_style_override = None;
+            }
+        }
+        for row in &mut self.rows {
+            for cell in &mut row.cells {
+                cell.derive_legacy_fields();
+            }
+        }
+    }
+
     pub fn sync_merged_ranges_from_cells(&mut self) {
         let ranges = self.canonical_merged_ranges();
         self.merged_ranges = ranges;

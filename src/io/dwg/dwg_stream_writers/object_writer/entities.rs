@@ -3475,7 +3475,7 @@ impl<'a> DwgObjectWriter<'a> {
 
     /// R2010+ inline cell.
     fn write_table_cell_r2010(&mut self, cell: &TableCell) {
-        let cell = cell.binary_layout();
+        let cell = cell.modern_layout();
         let cell: &TableCell = &cell;
         self.writer.write_bit_long(cell.state.bits() as i32);
         self.writer.write_variable_text(&cell.tooltip);
@@ -3591,7 +3591,8 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer
                 .write_handle(DwgReferenceType::HardPointer, handle.value());
         }
-        self.write_table_cell_style(e.base_style.as_ref());
+        let base_style = e.modern_base_style();
+        self.write_table_cell_style(base_style.as_deref());
         self.writer.write_bit_long(e.merged_ranges.len() as i32);
         for range in &e.merged_ranges {
             self.writer.write_bit_long(range.top_row as i32);
@@ -3901,7 +3902,7 @@ impl<'a> DwgObjectWriter<'a> {
                     .write_bit(e.dwg_r2010_unknown_bit.unwrap_or(true));
             }
             self.write_table_content(e);
-            self.writer.write_bit_short(e.dwg_unknown_short);
+            self.writer.write_bit_short(e.dwg_value_flags());
             self.writer.write_3bit_double(e.horizontal_direction);
             let has_break_data =
                 !e.break_options.is_empty() || !e.break_data.is_empty() || e.break_spacing != 0.0;
