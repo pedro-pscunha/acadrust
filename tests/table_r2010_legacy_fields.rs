@@ -101,3 +101,55 @@ fn the_legacy_fields_of_a_table_survive_a_dwg_from_r2010() {
         assert_eq!(fields(&table_of(&again)), source, "{version:?} twice");
     }
 }
+
+/// A table with a block cell as a DXF holds it: type 2, the block record (340), the scale (144) and an attribute value.
+fn block_cell_from_dxf(version: DxfVersion) -> CadDocument {
+    use acadrust::entities::table::{CellContent, CellType, TableAttribute, TableCellContentType};
+    let mut doc = CadDocument::with_version(version);
+    let mut record = acadrust::tables::BlockRecord::new("Logo");
+    record.handle = doc.allocate_handle();
+    let block = record.handle;
+    doc.block_records.add(record).unwrap();
+    let mut table = Table::new(Vector3::ZERO, 1, 2);
+    table.set_cell_text(0, 0, "a");
+    let cell = &mut table.rows[0].cells[1];
+    cell.cell_type = CellType::Block;
+    cell.block_scale = 2.0;
+    let mut content = CellContent::new();
+    content.content_type = TableCellContentType::Block;
+    content.block_handle = Some(block);
+    content.attributes.push(TableAttribute {
+        definition_handle: acadrust::Handle::new(0x4202),
+        value: "Acme".into(),
+        index: 1,
+    });
+    cell.contents = vec![content];
+    doc.add_entity(EntityType::Table(Box::new(table))).unwrap();
+    let bytes = DxfWriter::new(&doc).write_to_vec().unwrap();
+    DxfReader::from_reader(Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap()
+}
+
+#[test]
+fn a_block_cell_survives_a_dwg_from_r2010() {
+    use acadrust::entities::table::CellType;
+    for version in [
+        DxfVersion::AC1021,
+        DxfVersion::AC1024,
+        DxfVersion::AC1027,
+        DxfVersion::AC1032,
+    ] {
+        let doc = block_cell_from_dxf(version);
+        let dwg = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap();
+        let cell = &table_of(&dwg).rows[0].cells[1];
+        assert_eq!(cell.cell_type, CellType::Block, "{version:?}");
+        assert_eq!(cell.block_scale, 2.0, "{version:?}");
+        let content = &cell.contents[0];
+        assert!(content.block_handle.is_some(), "{version:?}");
+        assert_eq!(content.attributes[0].value, "Acme", "{version:?}");
+    }
+}

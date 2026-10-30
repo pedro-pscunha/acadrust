@@ -1122,12 +1122,25 @@ impl TableCell {
     /// content format has the rotation and the "auto scale" property. A cell without content has nowhere to hold them.
     pub(crate) fn modern_layout(&self) -> std::borrow::Cow<'_, TableCell> {
         let layout = self.binary_layout();
-        if (layout.rotation == 0.0 && !layout.auto_fit) || layout.contents.is_empty() {
+        let block_scale = layout.block_scale != 1.0
+            && layout
+                .contents
+                .iter()
+                .any(|c| c.content_type == TableCellContentType::Block && c.scale == 1.0);
+        if (layout.rotation == 0.0 && !layout.auto_fit && !block_scale) || layout.contents.is_empty()
+        {
             return layout;
         }
         let mut cell = layout.into_owned();
-        let (rotation, auto_fit) = (cell.rotation, cell.auto_fit);
+        let (rotation, auto_fit, scale) = (cell.rotation, cell.auto_fit, cell.block_scale);
         for content in &mut cell.contents {
+            if content.content_type == TableCellContentType::Block
+                && content.scale == 1.0
+                && scale != 1.0
+            {
+                content.scale = scale;
+                content.format_override_flags |= CellStylePropertyFlags::BLOCK_SCALE.bits() as i32;
+            }
             if rotation != 0.0
                 && content.format_override_flags & CellStylePropertyFlags::ROTATION.bits() as i32
                     == 0
@@ -1150,6 +1163,11 @@ impl TableCell {
         let rotation = CellStylePropertyFlags::ROTATION.bits() as i32;
         let auto_scale = CellStylePropertyFlags::AUTO_SCALE.bits() as i32;
         if let Some(content) = self.contents.first() {
+            // A block content is a block cell, with the content's scale as the block scale (DXF 144).
+            if content.content_type == TableCellContentType::Block {
+                self.cell_type = CellType::Block;
+                self.block_scale = content.scale;
+            }
             if content.format_override_flags & rotation != 0 {
                 self.rotation = content.rotation;
             }
