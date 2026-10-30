@@ -3466,6 +3466,21 @@ impl CadDocument {
             let h = self.allocate_handle();
             entity.as_entity_mut().set_handle(h);
             h
+        } else if self.entity_index.contains_key(&entity.common().handle) {
+            // Two records of a file with one handle: the later one gets a handle of its own, so that neither replaces the other.
+            let old = entity.common().handle;
+            let h = self.allocate_handle();
+            entity.as_entity_mut().set_handle(h);
+            self.notifications.notify(
+                crate::notification::NotificationType::Warning,
+                format!(
+                    "A {} has the handle {:X} of another entity: it is given the handle {:X}.",
+                    entity.as_entity().entity_type(),
+                    old.value(),
+                    h.value()
+                ),
+            );
+            h
         } else {
             let h = entity.common().handle;
             // Ensure the handle counter stays above this handle so

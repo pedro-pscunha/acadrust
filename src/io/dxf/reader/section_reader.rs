@@ -1616,6 +1616,8 @@ pub struct SectionReader<'a> {
     /// The reactors and extension dictionary the object being read named.
     object_links: ObjectLinks,
     decoded_records: usize,
+    /// The handles of the objects read so far, to tell a second object with one of them from a default the file replaces.
+    loaded_objects: std::collections::HashSet<Handle>,
     failsafe: bool,
     skipped_records: usize,
     recovery_errors: Vec<SectionRecoveryError>,
@@ -1676,6 +1678,7 @@ impl<'a> SectionReader<'a> {
             reader,
             object_links: ObjectLinks::default(),
             decoded_records: 0,
+            loaded_objects: std::collections::HashSet::new(),
             failsafe: false,
             skipped_records: 0,
             recovery_errors: Vec::new(),
@@ -3918,6 +3921,22 @@ impl<'a> SectionReader<'a> {
                                 let new_h = document.allocate_handle();
                                 entity.as_entity_mut().set_handle(new_h);
                                 new_h
+                            } else if document.entity_index.contains_key(&entity.common().handle) {
+                                // One handle for two records of the file: the later one gets a handle of its own.
+                                let old = entity.common().handle;
+                                let new_h = document.allocate_handle();
+                                entity.as_entity_mut().set_handle(new_h);
+                                document.notifications.notify(
+                                    crate::notification::NotificationType::Warning,
+                                    format!(
+                                        "A {} in the block {} has the handle {:X} of another entity: it is given the handle {:X}.",
+                                        entity.as_entity().entity_type(),
+                                        block_name,
+                                        old.value(),
+                                        new_h.value()
+                                    ),
+                                );
+                                new_h
                             } else {
                                 entity.common().handle
                             };
@@ -4228,6 +4247,27 @@ impl<'a> SectionReader<'a> {
     }
 
     /// Read ENDBLK entity
+    /// Add an object read from the file under its handle. When an earlier object of the file has that handle, the later one is
+    /// given a handle of its own and a warning says so, so that neither replaces the other.
+    fn insert_object(&mut self, document: &mut CadDocument, handle: Handle, mut object: ObjectType) {
+        if self.loaded_objects.insert(handle) {
+            document.objects.insert(handle, object);
+            return;
+        }
+        let new = document.allocate_handle();
+        object.set_handle(new);
+        self.loaded_objects.insert(new);
+        document.notifications.notify(
+            crate::notification::NotificationType::Warning,
+            format!(
+                "An object has the handle {:X} of another object: it is given the handle {:X}.",
+                handle.value(),
+                new.value()
+            ),
+        );
+        document.objects.insert(new, object);
+    }
+
     fn read_block_end(&mut self) -> Result<BlockEnd> {
         use crate::entities::BlockEnd;
 
@@ -7130,7 +7170,7 @@ impl<'a> SectionReader<'a> {
                         }
                         "LAYOUT" => {
                             if let Some(obj) = self.read_layout()? {
-                                document.objects.insert(obj.handle, ObjectType::Layout(obj));
+                                self.insert_object(document, obj.handle, ObjectType::Layout(obj));
                             }
                         }
                         "XRECORD" => {
@@ -7142,7 +7182,7 @@ impl<'a> SectionReader<'a> {
                         }
                         "GROUP" => {
                             if let Some(obj) = self.read_group()? {
-                                document.objects.insert(obj.handle, ObjectType::Group(obj));
+                                self.insert_object(document, obj.handle, ObjectType::Group(obj));
                             }
                         }
                         "MLINESTYLE" => {
@@ -7205,7 +7245,7 @@ impl<'a> SectionReader<'a> {
                         "SCALE" => {
                             if let Some(obj) = self.read_scale()? {
                                 self.apply_object_links(document, obj.handle);
-                                document.objects.insert(obj.handle, ObjectType::Scale(obj));
+                                self.insert_object(document, obj.handle, ObjectType::Scale(obj));
                             }
                         }
                         "SORTENTSTABLE" => {
@@ -7323,7 +7363,7 @@ impl<'a> SectionReader<'a> {
                                     objects: obj.referenced_objects.clone(),
                                 },
                             );
-                            document.objects.insert(obj.handle, ObjectType::Field(obj));
+                            self.insert_object(document, obj.handle, ObjectType::Field(obj));
                         }
                         "FIELDLIST" | "ACDBFIELDLIST" => {
                             let obj = self.read_field_list_dxf()?;
@@ -7338,7 +7378,7 @@ impl<'a> SectionReader<'a> {
                                 document
                                     .block_visibility_params
                                     .insert(parameter.handle, parameter.clone());
-                                document.objects.insert(
+                                self.insert_object(document, 
                                     parameter.handle,
                                     ObjectType::BlockVisibilityParameter(parameter.clone()),
                                 );
@@ -7433,7 +7473,7 @@ impl<'a> SectionReader<'a> {
                             } else {
                                 ObjectType::ProxyObject(object)
                             };
-                            document.objects.insert(handle, object_type);
+                            self.insert_object(document, handle, object_type);
                         }
                         name if is_registered_class_object_name(name) => {
                             let object = self.read_registered_class_object(name)?;
@@ -7453,7 +7493,7 @@ impl<'a> SectionReader<'a> {
                             // A raw DWG record a DWG bridge wrote (`DxfWriter::for_dwg_bridge`).
                             if let Some(raw) = RawDwgObject::from_codes(&raw_codes) {
                                 let object = raw.into_object(type_name, handle, owner);
-                                document.objects.insert(handle, object);
+                                self.insert_object(document, handle, object);
                                 return Ok(());
                             }
                             let raw_dxf_codes = if raw_codes.is_empty() {
@@ -7477,7 +7517,7 @@ impl<'a> SectionReader<'a> {
                                     raw_dwg_version: None,
                                 }
                             };
-                            document.objects.insert(handle, object);
+                            self.insert_object(document, handle, object);
                         }
                     }
                     Ok(())
