@@ -5838,11 +5838,20 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     fn write_hatch_gradient(&mut self, hatch: &Hatch) -> Result<()> {
-        if !hatch.gradient_color.enabled {
+        let gradient = &hatch.gradient_color;
+        // A solid hatch keeps the gradient it last had (the record holds the fields whether or not the fill is a gradient): write them
+        // as held, with 450 = 0, once the hatch has any.
+        let held = gradient.reserved != 0
+            || gradient.angle != 0.0
+            || gradient.shift != 0.0
+            || gradient.is_single_color
+            || gradient.color_tint != 0.0
+            || !gradient.colors.is_empty()
+            || !gradient.name.is_empty();
+        if !gradient.enabled && !held {
             return Ok(());
         }
-        let gradient = &hatch.gradient_color;
-        self.writer.write_i32(450, 1)?;
+        self.writer.write_i32(450, i32::from(gradient.enabled))?;
         self.writer.write_i32(451, gradient.reserved)?;
         self.writer.write_double(460, gradient.angle)?;
         self.writer.write_double(461, gradient.shift)?;
