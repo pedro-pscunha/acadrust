@@ -249,6 +249,9 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     /// Viewport IDs (69) derived per paper-space block when the source does
     /// not store them, reserving explicit IDs before filling gaps.
     paper_viewport_ids: HashMap<Handle, i16>,
+    /// Status (68) of the viewports that are on but past MAXACTVP in their paper-space block
+    /// (see `number_paper_space_viewports`).
+    paper_viewport_status: HashMap<Handle, i16>,
     /// Group 91 of a proxy for each class number of the document: 500 plus the position of the
     /// class in the CLASSES section.
     proxy_class_groups: HashMap<i32, i32>,
@@ -302,6 +305,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             acds_thumbnails: Vec::new(),
             writing_paper_space: false,
             paper_viewport_ids: HashMap::new(),
+            paper_viewport_status: HashMap::new(),
             proxy_class_groups: HashMap::new(),
             valid_handles: HashSet::new(),
             bylayer_linetype_handle: Handle::NULL,
@@ -2739,10 +2743,25 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             .filter(|id| *id > 0)
             .collect();
         let mut available_ids = (1..=i16::MAX).filter(|id| !used_ids.contains(id));
-        for viewport in viewports {
+        for viewport in viewports.clone() {
             if viewport.id == 0 {
                 self.paper_viewport_ids
                     .insert(viewport.common.handle, available_ids.next().unwrap_or(0));
+            }
+        }
+        // A DWG stores no status (68). A viewport read from one that is on is active, with its
+        // number as the status, while at most MAXACTVP viewports are on before it; the ones past
+        // the limit are on but not active, which is -1. A status the source gave in a DXF is
+        // `dxf_status`.
+        let limit = document.header.max_active_viewports;
+        let mut active = 0i16;
+        for viewport in viewports {
+            if viewport.is_on() && !viewport.off_screen {
+                active = active.saturating_add(1);
+                if limit > 0 && active > limit {
+                    self.paper_viewport_status
+                        .insert(viewport.common.handle, -1);
+                }
             }
         }
     }
@@ -6166,14 +6185,17 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 .copied()
                 .unwrap_or(0)
         };
-        let status =
-            viewport
-                .dxf_status
-                .unwrap_or_else(|| match (viewport.is_on(), viewport.off_screen) {
-                    (false, _) => 0,
-                    (true, true) => -1,
-                    (true, false) => id,
-                });
+        let status = viewport.dxf_status.unwrap_or_else(|| {
+            match (viewport.is_on(), viewport.off_screen) {
+                (false, _) => 0,
+                (true, true) => -1,
+                (true, false) => self
+                    .paper_viewport_status
+                    .get(&viewport.common.handle)
+                    .copied()
+                    .unwrap_or(id),
+            }
+        });
         self.writer.write_i16(68, status)?;
         self.writer.write_i16(69, id)?;
 

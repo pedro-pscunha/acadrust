@@ -122,3 +122,63 @@ fn old_serialized_status_defaults_explicit_off_to_false() {
     let restored: ViewportStatusFlags = serde_json::from_value(value).unwrap();
     assert_eq!(restored.to_bits() & (ON | OFF), ON);
 }
+
+/// The status (68) of the viewports of a layout, in order, as a DXF holds it.
+fn statuses(doc: &CadDocument) -> Vec<i32> {
+    let text = String::from_utf8(DxfWriter::new(doc).write_to_vec().unwrap()).unwrap();
+    let lines: Vec<_> = text.lines().collect();
+    let fields: Vec<_> = lines.chunks_exact(2).collect();
+    let mut out = Vec::new();
+    let mut in_viewport = false;
+    for pair in fields {
+        match (pair[0].trim(), pair[1].trim()) {
+            ("0", kind) => in_viewport = kind == "VIEWPORT",
+            ("68", value) if in_viewport => out.push(value.parse().unwrap()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A DWG holds no status (68). A viewport read from one has it by AutoCAD's rule: 0 when off, its number when it is on and active,
+/// -1 when it is on but past MAXACTVP.
+#[test]
+fn the_status_of_a_viewport_read_from_a_dwg_follows_maxactvp() {
+    let mut doc = CadDocument::new();
+    doc.header.max_active_viewports = 3;
+    for (width, bits) in [(161., ON), (162., OFF), (163., ON), (164., ON), (165., ON)] {
+        let mut view = Viewport::new();
+        view.width = width;
+        view.height = 100.;
+        view.status = ViewportStatusFlags::from_bits(bits);
+        doc.add_entity_to_layout(EntityType::Viewport(Box::new(view)), "Layout1")
+            .unwrap();
+    }
+    let dwg = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+        .read()
+        .unwrap();
+    let all = statuses(&dwg);
+    let ours = &all[all.len() - 5..];
+    assert_eq!(ours, [1, 0, 3, 4, -1], "{all:?}");
+}
+
+/// A status a DXF holds is kept in a DXF, whatever the viewport's id.
+#[test]
+fn the_status_of_a_viewport_read_from_a_dxf_is_kept() {
+    let mut doc = CadDocument::new();
+    for (width, id, status) in [(161., 2, -1), (162., 2, 7), (163., 3, 3)] {
+        let mut view = Viewport::new();
+        view.width = width;
+        view.height = 100.;
+        view.id = id;
+        view.dxf_status = Some(status);
+        doc.add_entity_to_layout(EntityType::Viewport(Box::new(view)), "Layout1")
+            .unwrap();
+    }
+    let dxf = DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let all = statuses(&dxf);
+    assert_eq!(&all[all.len() - 3..], [-1, 7, 3], "{all:?}");
+}
