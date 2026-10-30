@@ -69,7 +69,10 @@ pub(super) fn write(spline: &Spline) -> i16 {
     if spline.flags.rational {
         flags |= 4;
     }
-    if spline.flags.planar {
+    // A spline read from a DWG has no field for the planar bit: AutoCAD writes it for a spline whose points lie in a plane (measured on
+    // 3900 splines of AutoCAD files, without an exception). The linear bit (16) has no rule that could be measured the same way: of
+    // the splines with collinear points a fifth have it, with or without fit points, in order along the line or not.
+    if spline.flags.planar || (spline.dwg_scenario.is_some() && spline.dxf_flags == 0 && spline.is_planar()) {
         flags |= 8;
     }
     if spline.flags.linear {
