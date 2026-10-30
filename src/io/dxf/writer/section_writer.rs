@@ -10843,7 +10843,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_color_i32(90, ctx.text_color)?;
             self.writer
                 .write_i16(171, ctx.text_attachment_point as i16)?;
-            self.writer.write_i16(172, ctx.text_flow_direction as i16)?;
+            self.writer.write_i16(172, ctx.text_flow_direction.value())?;
             self.write_color_i32(91, ctx.background_fill_color)?;
             self.writer.write_double(141, ctx.background_scale_factor)?;
             self.writer.write_i32(92, ctx.background_transparency)?;
@@ -10985,7 +10985,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             self.write_color_i32(90, ctx.text_color)?;
             self.writer
                 .write_i16(171, ctx.text_attachment_point as i16)?;
-            self.writer.write_i16(172, ctx.text_flow_direction as i16)?;
+            self.writer.write_i16(172, ctx.text_flow_direction.value())?;
             self.write_color_i32(91, ctx.background_fill_color)?;
             self.writer.write_double(141, ctx.background_scale_factor)?;
             self.writer.write_i32(92, ctx.background_transparency)?;

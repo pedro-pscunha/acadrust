@@ -233,18 +233,32 @@ impl From<i16> for TextAlignmentType {
     }
 }
 
-/// Flow direction for text columns.
+/// Flow direction of the text of a multileader (DXF 172): 1 horizontal, 3 vertical, 6 by style (ODA specification 20.4.86).
+/// A value outside those is kept as read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[repr(i16)]
 pub enum FlowDirectionType {
     /// Horizontal flow.
     #[default]
-    Horizontal = 1,
+    Horizontal,
     /// Vertical flow.
-    Vertical = 3,
+    Vertical,
     /// Use style setting.
-    ByStyle = 5,
+    ByStyle,
+    /// Another value, as the file gave it.
+    Other(i16),
+}
+
+impl FlowDirectionType {
+    /// The value of DXF group 172.
+    pub fn value(self) -> i16 {
+        match self {
+            Self::Horizontal => 1,
+            Self::Vertical => 3,
+            Self::ByStyle => 6,
+            Self::Other(value) => value,
+        }
+    }
 }
 
 impl From<i16> for FlowDirectionType {
@@ -252,8 +266,8 @@ impl From<i16> for FlowDirectionType {
         match value {
             1 => Self::Horizontal,
             3 => Self::Vertical,
-            5 => Self::ByStyle,
-            _ => Self::Horizontal,
+            6 => Self::ByStyle,
+            other => Self::Other(other),
         }
     }
 }

@@ -4469,7 +4469,7 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer
                 .write_bit_short(ctx.text_attachment_point as i16);
             // BS 172 Flow direction
-            self.writer.write_bit_short(ctx.text_flow_direction as i16);
+            self.writer.write_bit_short(ctx.text_flow_direction.value());
             // CMC 91 Background fill color
             self.writer.write_cm_color(&ctx.background_fill_color);
             // BD 141 Background scale factor
