@@ -583,7 +583,7 @@ pub(crate) fn default_classes() -> Vec<DxfClass> {
         ("BLOCKLOOKUPGRIP", "AcDbBlockLookupGrip", 0, "ObjectDBX Classes", false),
         ("BLOCKROTATIONGRIP", "AcDbBlockRotationGrip", 0, "ObjectDBX Classes", false),
         ("BLOCKMOVEACTION", "AcDbBlockMoveAction", 0, "ObjectDBX Classes", false),
-        ("BLOCKROTATEACTION", "AcDbBlockRotationAction", 0, "ObjectDBX Classes", false),
+        ("BLOCKROTATEACTION", "AcDbBlockRotateAction", 0, "ObjectDBX Classes", false),
         ("BLOCKSCALEACTION", "AcDbBlockScaleAction", 0, "ObjectDBX Classes", false),
         ("BLOCKVISIBILITYGRIP", "AcDbBlockVisibilityGrip", 0, "ObjectDBX Classes", false),
         ("BLOCKLINEARPARAMETER", "AcDbBlockLinearParameter", 0, "ObjectDBX Classes", false),
