@@ -14,6 +14,7 @@
 pub mod aci_table;
 pub mod bounds;
 pub mod color;
+pub(crate) mod dimension_frame;
 pub mod handle;
 pub mod line_weight;
 pub mod transform;

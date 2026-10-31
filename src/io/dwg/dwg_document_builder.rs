@@ -8865,8 +8865,12 @@ fn map_dimension_common(
     base.flip_arrow1 = common.flip_arrow1;
     base.flip_arrow2 = common.flip_arrow2;
     base.actual_measurement = common.actual_measurement;
-    base.insertion_point =
-        crate::types::Vector3::new(common.insertion_point.x, common.insertion_point.y, 0.0);
+    // Group 12 is an OCS point in the entity's frame, which a DWG stores as the X and Y of the WCS point (its Z is 0, as AutoCAD
+    // writes it).
+    base.insertion_point = crate::types::dimension_frame::to_ocs(
+        base.normal,
+        crate::types::Vector3::new(common.insertion_point.x, common.insertion_point.y, 0.0),
+    );
     base.style_name = maps.dimstyle_name(common.dimstyle_handle);
     base.block_name = maps.block_name(common.block_handle);
 }

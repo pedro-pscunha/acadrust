@@ -2481,9 +2481,10 @@ impl<'a> DwgObjectWriter<'a> {
             self.writer.write_bit(base.flip_arrow2);
         }
 
-        // 12-pt 2RD 12
+        // 12-pt 2RD 12: the X and Y of the point in the WCS, the point being an OCS one of the entity's frame.
+        let clone_point = crate::types::dimension_frame::to_wcs(base.normal, base.insertion_point);
         self.writer
-            .write_2raw_double(Vector2::new(base.insertion_point.x, base.insertion_point.y));
+            .write_2raw_double(Vector2::new(clone_point.x, clone_point.y));
 
         // Dim style handle (hard pointer)
         let ds_handle = self
