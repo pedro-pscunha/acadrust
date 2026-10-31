@@ -120,6 +120,11 @@ impl ExtendedData {
 
     // Update the modeled fields while retaining unrelated values owned by the app.
     pub(crate) fn merge_modeled_record(&mut self, replacement: &ExtendedDataRecord) {
+        // The record keeps its place among the applications: AutoCAD keeps the order of a file.
+        let place = self
+            .records
+            .iter()
+            .position(|record| record.application_name == replacement.application_name);
         let mut record = self
             .remove_record(&replacement.application_name)
             .unwrap_or_else(|| ExtendedDataRecord::new(&replacement.application_name));
@@ -175,7 +180,10 @@ impl ExtendedData {
                 }
             }
         }
-        self.add_record(record);
+        match place {
+            Some(place) => self.records.insert(place, record),
+            None => self.add_record(record),
+        }
     }
 
     /// Remove and return the record owned by `application_name`.
@@ -245,5 +253,30 @@ mod tests {
         assert_eq!(xdata.len(), 1);
         assert!(xdata.get_record("APP1").is_some());
         assert!(xdata.get_record("APP2").is_none());
+    }
+
+    #[test]
+    fn a_modeled_record_keeps_its_place_among_the_applications() {
+        let mut xdata = ExtendedData::new();
+        for app in ["AcAecLayerStandard", "RAK"] {
+            let mut record = ExtendedDataRecord::new(app);
+            record.add_value(XDataValue::String(String::new()));
+            record.add_value(XDataValue::String("old".to_string()));
+            xdata.add_record(record);
+        }
+        let mut replacement = ExtendedDataRecord::new("AcAecLayerStandard");
+        replacement.add_value(XDataValue::String(String::new()));
+        replacement.add_value(XDataValue::String("new".to_string()));
+        xdata.merge_modeled_record(&replacement);
+        let apps: Vec<&str> = xdata
+            .records()
+            .iter()
+            .map(|r| r.application_name.as_str())
+            .collect();
+        assert_eq!(apps, ["AcAecLayerStandard", "RAK"]);
+        assert_eq!(
+            xdata.get_record("AcAecLayerStandard").unwrap().values[1],
+            XDataValue::String("new".to_string())
+        );
     }
 }
