@@ -37,11 +37,9 @@ fn dwg_spline_exposes_form_when_flags_are_not_stored() {
 
         assert_eq!(splines.len(), 2, "{version:?}");
         let fit = splines.iter().find(|s| s.dwg_scenario == Some(2)).unwrap();
-        assert_eq!(
-            fit.flags.closed,
-            version == DxfVersion::AC1027,
-            "{version:?}"
-        );
+        // Bit 4 of a fit-point spline's flags is Periodic, so a closed spline that is not periodic reads back as closed only when its end
+        // fit points are equal, which these three are not.
+        assert!(!fit.flags.closed, "{version:?}");
         assert!(!fit.flags.periodic, "{version:?}");
 
         let control = splines.iter().find(|s| s.dwg_scenario == Some(1)).unwrap();
