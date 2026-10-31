@@ -183,17 +183,17 @@ pub(crate) fn mesh_vertex_common(vertex: &EntityCommon, parent: &EntityCommon) -
 }
 
 /// Whether a child record's common data holds anything that the polyline's own data does not give
-/// it (see [`child_common`]).
+/// it (see [`child_common`]). A ByLayer child under a polyline of another colour has data of its
+/// own: AutoCAD keeps it, and does not repair it on a save.
 pub(crate) fn child_has_data(child: &EntityCommon, parent: &EntityCommon) -> bool {
     let plain = child.extended_data.is_empty()
         && child.extended_data.raw_dwg_eed.is_empty()
         && child.xdictionary_handle.is_none()
         && child.reactors.is_empty()
-        && (child.color == crate::types::Color::ByLayer || child.color == parent.color)
-        && (!child.has_linetype() || child.linetype == parent.linetype)
-        && (child.line_weight == crate::types::LineWeight::ByLayer
-            || child.line_weight == parent.line_weight)
-        && (child.linetype_scale - 1.0).abs() < 1e-12
+        && child.color == parent.color
+        && child.linetype == parent.linetype
+        && child.line_weight == parent.line_weight
+        && (child.linetype_scale - parent.linetype_scale).abs() < 1e-12
         && !child.invisible
         && child.transparency.is_by_layer()
         && child.plotstyle_flags == 0
