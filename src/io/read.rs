@@ -183,6 +183,7 @@ pub struct ReadOutcome {
 impl ReadOutcome {
     pub fn new(mut document: CadDocument, stats: ReadStats) -> Self {
         super::loft_parameters::restore(&mut document);
+        document.reflect_current_mleader_style();
         document.source_hatch_boundaries = document
             .entities()
             .filter_map(|entity| {

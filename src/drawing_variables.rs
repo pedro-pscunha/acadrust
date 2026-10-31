@@ -3,6 +3,7 @@ use crate::types::Handle;
 use crate::CadDocument;
 
 const VARIABLES: &str = "AcDbVariableDictionary";
+const CMLEADERSTYLE: &str = "CMLEADERSTYLE";
 
 impl CadDocument {
     /// Read a serialized drawing variable without modifying its dictionary.
@@ -80,6 +81,45 @@ impl CadDocument {
             }
         }
         true
+    }
+
+    /// The current multileader style (CMLEADERSTYLE) lives in the variable dictionary of a DWG and of AutoCAD's DXF, whose
+    /// header has no field for it: a header that still has the default name takes the variable's.
+    pub(crate) fn reflect_current_mleader_style(&mut self) {
+        if !self
+            .header
+            .current_mleader_style_name
+            .eq_ignore_ascii_case("Standard")
+        {
+            return;
+        }
+        let Some(name) = self
+            .drawing_variable(CMLEADERSTYLE)
+            .filter(|name| !name.trim().is_empty())
+        else {
+            return;
+        };
+        if !name.eq_ignore_ascii_case("Standard") {
+            self.header.current_mleader_style_name = name.to_owned();
+        }
+    }
+
+    /// The name a DWG save of 2004 or later writes in the variable dictionary for the header's current multileader style: the
+    /// variable that exists gets the name when it differs (case apart), and a non-default name makes the variable. The
+    /// default name creates nothing, and a release before 2004 has no such dictionary.
+    pub(crate) fn current_mleader_style_to_write(&self) -> Option<String> {
+        if self.version < crate::types::DxfVersion::AC1018 {
+            return None;
+        }
+        let name = self.header.current_mleader_style_name.trim();
+        match self.drawing_variable(CMLEADERSTYLE) {
+            Some(value) if value.eq_ignore_ascii_case(name) => None,
+            Some(_) => Some(name.to_owned()),
+            None if !name.is_empty() && !name.eq_ignore_ascii_case("Standard") => {
+                Some(name.to_owned())
+            }
+            None => None,
+        }
     }
 
     /// Default hatch origin in drawing coordinates. Missing/malformed entries use zero.

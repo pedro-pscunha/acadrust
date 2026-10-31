@@ -111,6 +111,7 @@ impl DwgWriter {
         }
         prepare_surface_classes(&mut prepared);
         prepare_database_references(&mut prepared);
+        prepare_current_mleader_style(&mut prepared);
         prepare_table_keys(&mut prepared);
         prepare_active_viewport_elevation(&mut prepared);
         prepare_roundtrip_records(&mut prepared);
@@ -201,6 +202,7 @@ impl DwgWriter {
         let mut prepared = crate::io::loft_parameters::prepared(document);
         prepare_surface_classes(&mut prepared);
         prepare_database_references(&mut prepared);
+        prepare_current_mleader_style(&mut prepared);
         prepare_table_keys(&mut prepared);
         prepare_active_viewport_elevation(&mut prepared);
         prepare_roundtrip_records(&mut prepared);
@@ -721,6 +723,15 @@ fn prepare_book_colors(document: &mut std::borrow::Cow<'_, CadDocument>) -> Resu
 /// Complete new relationships that are stored in both directions in a DWG database.
 /// Imported forward hatch links keep the source's missing reverse reactors.
 /// The caller's document stays unchanged; corrections exist only in the output copy.
+/// A DWG save writes the header's current multileader style in the variable dictionary (on the output copy).
+fn prepare_current_mleader_style(document: &mut std::borrow::Cow<'_, CadDocument>) {
+    if let Some(name) = document.current_mleader_style_to_write() {
+        document
+            .to_mut()
+            .set_drawing_variable("CMLEADERSTYLE", &name);
+    }
+}
+
 pub(crate) fn prepare_database_references(document: &mut std::borrow::Cow<'_, CadDocument>) {
     use crate::entities::EntityType;
     use crate::objects::ObjectType;
