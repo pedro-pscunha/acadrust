@@ -41,3 +41,19 @@ fn a_rotation_leaves_the_widths_as_they_are() {
     assert!(near(polyline.vertices[0].start_width, 0.0625));
     assert!(near(polyline.vertices[1].start_width, 0.5));
 }
+
+/// The widths are lengths in the plane of the polyline: a scale of its plane's axes scales them, whatever the plane is.
+#[test]
+fn a_scale_of_the_plane_scales_the_widths_of_a_polyline_in_yz_and_xz() {
+    for (normal, scale) in [
+        (Vector3::new(1.0, 0.0, 0.0), Vector3::new(1.0, 2.0, 2.0)),
+        (Vector3::new(0.0, 1.0, 0.0), Vector3::new(2.0, 1.0, 2.0)),
+    ] {
+        let mut polyline = polyline();
+        polyline.normal = normal;
+        polyline.apply_transform(&Transform::from_scaling(scale));
+        assert_eq!(polyline.constant_width, 0.5, "{normal:?}");
+        assert_eq!(polyline.vertices[0].start_width, 0.125, "{normal:?}");
+        assert_eq!(polyline.vertices[1].end_width, 0.0, "{normal:?}");
+    }
+}
