@@ -33,6 +33,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
+#[path = "document/book_color_tests.rs"]
+mod book_color_tests;
+#[cfg(test)]
 #[path = "document/evaluated_block_tests.rs"]
 mod evaluated_block_tests;
 
@@ -6797,7 +6800,7 @@ impl CadDocument {
     }
 
     pub(crate) fn resolve_book_colors(&mut self) {
-        let colors: Vec<(Handle, Color, String, String)> = self
+        let mut colors: Vec<(Handle, Color, String, String)> = self
             .objects
             .iter()
             .filter_map(|(handle, object)| match object {
@@ -6813,6 +6816,8 @@ impl CadDocument {
         if colors.is_empty() {
             return;
         }
+        // `objects` is a HashMap, which iterates in an order seeded per instance: two book colors of one name resolve to the lowest handle.
+        colors.sort_by_key(|entry| entry.0);
 
         let resolve = |common: &mut EntityCommon| {
             let resolved = common
