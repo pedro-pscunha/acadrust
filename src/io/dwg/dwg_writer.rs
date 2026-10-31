@@ -270,7 +270,10 @@ fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
         if !bytes {
             Some("no DWG data (it came from a DXF)".to_string())
         } else if source.is_some_and(|source| source != version) {
-            Some(format!("its DWG data is of {:?}, not {version:?}", source.unwrap_or(version)))
+            Some(format!(
+                "its DWG data is of {:?}, not {version:?}",
+                source.unwrap_or(version)
+            ))
         } else if !parses {
             Some("its DWG data is not a record of this version".to_string())
         } else {
@@ -285,13 +288,14 @@ fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
                     continue;
                 };
                 let fits = data.raw_dwg_data.is_some()
-                    && data.dwg_source_version.is_none_or(|source| source == version);
+                    && data
+                        .dwg_source_version
+                        .is_none_or(|source| source == version);
                 (
                     data.dxf_name.clone(),
                     data.raw_dwg_data.is_some(),
                     data.dwg_source_version,
-                    !fits
-                        || DwgObjectWriter::validate_architecture_record(data, version).is_ok(),
+                    !fits || DwgObjectWriter::validate_architecture_record(data, version).is_ok(),
                 )
             }
             crate::entities::EntityType::Unknown(entity) => (
@@ -317,7 +321,9 @@ fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
         let (name, bytes, source, parses) = match object {
             crate::objects::ObjectType::Arch(object) => {
                 let fits = object.raw_dwg_data.is_some()
-                    && object.raw_dwg_version.is_none_or(|source| source == version);
+                    && object
+                        .raw_dwg_version
+                        .is_none_or(|source| source == version);
                 (
                     object.dxf_name.clone(),
                     object.raw_dwg_data.is_some(),
@@ -330,7 +336,12 @@ fn unwritable_records(document: &CadDocument) -> Vec<Unwritable> {
                 raw_dwg_data,
                 raw_dwg_version,
                 ..
-            } => (type_name.clone(), raw_dwg_data.is_some(), *raw_dwg_version, true),
+            } => (
+                type_name.clone(),
+                raw_dwg_data.is_some(),
+                *raw_dwg_version,
+                true,
+            ),
             _ => continue,
         };
         if let Some(reason) = reason(bytes, source, parses) {
@@ -1056,7 +1067,10 @@ pub(crate) fn prepare_table_keys(document: &mut std::borrow::Cow<'_, CadDocument
 /// Whether a table style's cell style map still holds the style's own cell styles. AutoCAD keeps
 /// the map its 2007-format saves left on an R2010+ drawing's table styles, so a matching one stays;
 /// a map the style has moved on from is dropped.
-fn cell_style_map_matches(style: &crate::objects::ObjectType, map: &crate::objects::DataObject) -> bool {
+fn cell_style_map_matches(
+    style: &crate::objects::ObjectType,
+    map: &crate::objects::DataObject,
+) -> bool {
     let (
         crate::objects::ObjectType::TableStyle(style),
         crate::objects::DataObjectData::CellStyleMap(map),
@@ -1380,7 +1394,8 @@ fn reconciled_classes(
                 class.was_zombie = false;
             } else if counts_complete {
                 class.instance_count = 0;
-                if class.dwg_version == 0
+                if !class.flags_from_file
+                    && class.dwg_version == 0
                     && class.maintenance_version == 0
                     && !FIXED_CLASSES
                         .iter()
@@ -1595,10 +1610,9 @@ fn prepare_header(
     {
         let is_default_name = h.current_text_style_name.eq_ignore_ascii_case("Standard");
         let handle_is_valid_custom = !h.current_text_style_handle.is_null()
-            && document
-                .text_styles
-                .iter()
-                .any(|t| t.handle == h.current_text_style_handle && !t.name.eq_ignore_ascii_case("Standard"));
+            && document.text_styles.iter().any(|t| {
+                t.handle == h.current_text_style_handle && !t.name.eq_ignore_ascii_case("Standard")
+            });
         if !is_default_name || !handle_is_valid_custom {
             h.current_text_style_handle = s.handle;
         }
@@ -1610,10 +1624,9 @@ fn prepare_header(
     {
         let is_default_name = h.current_dimstyle_name.eq_ignore_ascii_case("Standard");
         let handle_is_valid_custom = !h.current_dimstyle_handle.is_null()
-            && document
-                .dim_styles
-                .iter()
-                .any(|d| d.handle == h.current_dimstyle_handle && !d.name.eq_ignore_ascii_case("Standard"));
+            && document.dim_styles.iter().any(|d| {
+                d.handle == h.current_dimstyle_handle && !d.name.eq_ignore_ascii_case("Standard")
+            });
         if !is_default_name || !handle_is_valid_custom {
             h.current_dimstyle_handle = s.handle;
         }

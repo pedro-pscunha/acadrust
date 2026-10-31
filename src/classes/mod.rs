@@ -101,6 +101,9 @@ pub struct DxfClass {
     pub unknown1: i32,
     /// Second reserved class metadata value (normally zero).
     pub unknown2: i32,
+    /// The class record came from a file (see [`DxfClassCollection::add_from_file`]): its zombie flag is the file's, and a DWG save keeps it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub flags_from_file: bool,
 }
 
 impl DxfClass {
@@ -120,6 +123,7 @@ impl DxfClass {
             maintenance_version: 0,
             unknown1: 0,
             unknown2: 0,
+            flags_from_file: false,
         }
     }
 
@@ -193,8 +197,12 @@ impl DxfClassCollection {
                 existing.was_zombie = class.was_zombie;
                 existing.is_an_entity = class.is_an_entity;
                 existing.item_class_id = class.item_class_id;
+                existing.flags_from_file = true;
             }
-            None => self.add_or_update(class),
+            None => self.add_or_update(DxfClass {
+                flags_from_file: true,
+                ..class
+            }),
         }
     }
 

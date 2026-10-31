@@ -191,6 +191,7 @@ mod tests {
             proxy_flags: ProxyFlags::NONE,
             instance_count: 0,
             was_zombie: false,
+            flags_from_file: false,
             is_an_entity: false,
             class_number: number,
             item_class_id: 0x1F3, // object
