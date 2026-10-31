@@ -1395,7 +1395,10 @@ fn reconciled_classes(
         .map(|mut class| {
             if let Some(&count) = instance_counts.get(&class.class_number) {
                 class.instance_count = count;
-                class.was_zombie = false;
+                // A class read from a file keeps the zombie flag the file gave it, used or not.
+                if !class.flags_from_file {
+                    class.was_zombie = false;
+                }
             } else if counts_complete {
                 class.instance_count = 0;
                 if !class.flags_from_file
