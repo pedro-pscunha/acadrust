@@ -63,3 +63,19 @@ fn the_clone_point_of_a_dimension_in_the_world_frame_is_unchanged() {
         );
     }
 }
+
+#[test]
+fn the_clone_point_of_a_dimension_in_the_flipped_world_frame_survives() {
+    // Normal (0, 0, -1) has the X axis (-1, 0, 0): the stored WCS X is the OCS X negated, and it reads back as the OCS point.
+    for version in [DxfVersion::AC1015, DxfVersion::AC1027] {
+        let read = through_dwg(
+            Vector3::new(0.0, 0.0, -1.0),
+            Vector3::new(4.0, 5.0, 0.0),
+            version,
+        );
+        assert!(
+            close(read, Vector3::new(4.0, 5.0, 0.0)),
+            "{version:?}: {read:?}"
+        );
+    }
+}
