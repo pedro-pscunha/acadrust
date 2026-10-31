@@ -1,5 +1,5 @@
-//! An xdata handle (1005) that is null, or names nothing in the document, keeps its place as
-//! the null handle. AutoCAD's dimension overrides (`ACAD` DSTYLE) are `1070 <variable>` then the
+//! An xdata handle (1005) that is null keeps its place as the null handle, and one that names nothing in the document stays as the file
+//! gave it (AutoCAD keeps it; see `xdata_handle_to_missing_object`). AutoCAD's dimension overrides (`ACAD` DSTYLE) are `1070 <variable>` then the
 //! value, so a dropped `1005 0` after `1070 340` (DIMTXSTY) shifted every later pair.
 
 use std::io::Cursor;
@@ -45,7 +45,7 @@ fn null_and_dangling_xdata_handles_keep_their_place() {
         XDataValue::Integer16(340),
         XDataValue::Handle(Handle::NULL),
         XDataValue::Integer16(341),
-        XDataValue::Handle(Handle::NULL),
+        XDataValue::Handle(Handle::new(0xFFFF)),
         XDataValue::Integer16(41),
         XDataValue::Real(2.5),
     ];

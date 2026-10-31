@@ -258,6 +258,8 @@ pub struct SectionWriter<'a, W: DxfStreamWriter> {
     /// Set of all handles that will exist in the output DXF.
     /// Used to filter reactor/xdictionary references to non-existent objects.
     valid_handles: HashSet<Handle>,
+    /// The handles of the document objects the output leaves out (see `build_valid_handles`): a reference to one becomes null.
+    omitted_handles: HashSet<Handle>,
     /// Handle of the ByLayer linetype (for defaults in MLeader etc.)
     bylayer_linetype_handle: Handle,
     /// Handle of the ByBlock linetype (treated as "unset" for MLeader etc.)
@@ -308,6 +310,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             paper_viewport_status: HashMap::new(),
             proxy_class_groups: HashMap::new(),
             valid_handles: HashSet::new(),
+            omitted_handles: HashSet::new(),
             bylayer_linetype_handle: Handle::NULL,
             byblock_linetype_handle: Handle::NULL,
             model_space_handle: Handle::NULL,
@@ -423,6 +426,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         ));
         self.named_handles = named_handles(document);
         let mut set = HashSet::new();
+        let mut omitted = HashSet::new();
         // Object handles — but EXCLUDE unsupported objects read from DWG that
         // have no DXF representation (Unknown with no raw_dxf_codes):
         // write_unknown_object skips those, so any reference to them would
@@ -444,16 +448,19 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     ..
                 } => {
                     if raw_dxf_codes.is_none() || is_unrestorable_assoc_object(type_name) {
+                        omitted.insert(*h);
                         continue;
                     }
                 }
                 ObjectType::Arch(object) => {
                     if object.raw_dxf_codes.is_none() {
+                        omitted.insert(*h);
                         continue;
                     }
                 }
                 ObjectType::Associative(assoc) => {
                     if is_unrestorable_assoc_object(&assoc.dxf_name) {
+                        omitted.insert(*h);
                         continue;
                     }
                 }
@@ -461,6 +468,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                 ObjectType::DynamicBlock(dynamic)
                     if is_unrestorable_assoc_object(&dynamic.dxf_name) && !self.dwg_bridge =>
                 {
+                    omitted.insert(*h);
                     continue;
                 }
                 _ => {}
@@ -634,6 +642,7 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
             })
             .unwrap_or(Handle::NULL);
         self.valid_handles = set;
+        self.omitted_handles = omitted;
         // Store ByLayer/ByBlock linetype handles for use as default in MLeader etc.
         if let Some(lt) = document.line_types.get("ByLayer") {
             self.bylayer_linetype_handle = lt.handle();
@@ -10783,9 +10792,10 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
                     XDataValue::Handle(h) => {
                         // A handle that pointed at an omitted Arch object would
                         // otherwise remain as an unknown xdata reference: it becomes the
-                        // null handle. The group stays, because xdata is positional
+                        // null handle. A handle that names no object of the document stays as
+                        // the file gave it, as AutoCAD keeps it. The group stays, because xdata is positional
                         // (DSTYLE is `1070 <variable>` then its value).
-                        let live = self.valid_handles.is_empty() || self.valid_handles.contains(h);
+                        let live = !self.omitted_handles.contains(h);
                         self.writer
                             .write_handle(1005, if live { *h } else { Handle::NULL })?;
                     }
