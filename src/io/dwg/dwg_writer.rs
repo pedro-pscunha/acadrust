@@ -718,9 +718,9 @@ fn prepare_book_colors(document: &mut std::borrow::Cow<'_, CadDocument>) -> Resu
     Ok(())
 }
 
-/// Repair relationships that are stored in both directions in a DWG database.
-/// The caller's document stays unchanged; corrections exist only in the output
-/// copy.
+/// Complete new relationships that are stored in both directions in a DWG database.
+/// Imported forward hatch links keep the source's missing reverse reactors.
+/// The caller's document stays unchanged; corrections exist only in the output copy.
 pub(crate) fn prepare_database_references(document: &mut std::borrow::Cow<'_, CadDocument>) {
     use crate::entities::EntityType;
     use crate::objects::ObjectType;
@@ -757,6 +757,10 @@ pub(crate) fn prepare_database_references(document: &mut std::borrow::Cow<'_, Ca
                         .is_some_and(|boundary| {
                             !boundary.common().reactors.contains(&hatch.common.handle)
                         })
+                        && !document
+                            .source_hatch_boundaries
+                            .get(&hatch.common.handle)
+                            .is_some_and(|source| source.contains(&boundary_handle))
                     {
                         missing_hatch_reactors.push((boundary_handle, hatch.common.handle));
                     }

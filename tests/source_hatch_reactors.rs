@@ -26,6 +26,45 @@ fn assert_source_relations(document: &CadDocument, stage: &str) {
 }
 
 #[test]
+fn new_and_changed_associations_still_receive_reverse_reactors() {
+    let mut document = DxfReader::from_reader(Cursor::new(source()))
+        .unwrap()
+        .read()
+        .unwrap();
+    let mut boundary = document.get_entity(Handle::new(0xA1)).unwrap().clone();
+    boundary.common_mut().handle = Handle::NULL;
+    boundary.common_mut().reactors.clear();
+    let new_boundary = document.add_entity(boundary).unwrap();
+    let mut hatch = document.get_entity(Handle::new(0xB2)).unwrap().clone();
+    hatch.common_mut().handle = Handle::NULL;
+    let new_hatch = document.add_entity(hatch).unwrap();
+    let EntityType::Hatch(changed) = document.get_entity_mut(Handle::new(0xB2)).unwrap() else {
+        panic!("HATCH")
+    };
+    changed.paths[0].boundary_handles = vec![new_boundary];
+    let bytes = DwgWriter::write_to_vec(&document).unwrap();
+    assert!(document
+        .get_entity(new_boundary)
+        .unwrap()
+        .common()
+        .reactors
+        .is_empty());
+    let saved = DwgReader::from_stream(Cursor::new(bytes)).read().unwrap();
+    let original = &saved
+        .get_entity(Handle::new(0xA1))
+        .unwrap()
+        .common()
+        .reactors;
+    assert!(original.contains(&Handle::new(0xB1)));
+    assert!(original.contains(&new_hatch));
+    assert!(!original.contains(&Handle::new(0xB2)));
+    assert_eq!(
+        saved.get_entity(new_boundary).unwrap().common().reactors,
+        vec![Handle::new(0xB2)]
+    );
+}
+
+#[test]
 fn dwg_saves_preserve_missing_source_hatch_reverse_reactors() {
     let mut document = DxfReader::from_reader(Cursor::new(source()))
         .unwrap()

@@ -183,6 +183,24 @@ pub struct ReadOutcome {
 impl ReadOutcome {
     pub fn new(mut document: CadDocument, stats: ReadStats) -> Self {
         super::loft_parameters::restore(&mut document);
+        document.source_hatch_boundaries = document
+            .entities()
+            .filter_map(|entity| {
+                let crate::entities::EntityType::Hatch(hatch) = entity else {
+                    return None;
+                };
+                hatch.is_associative.then(|| {
+                    (
+                        hatch.common.handle,
+                        hatch
+                            .paths
+                            .iter()
+                            .flat_map(|path| path.boundary_handles.iter().copied())
+                            .collect(),
+                    )
+                })
+            })
+            .collect();
         Self { document, stats }
     }
 }
