@@ -157,7 +157,7 @@ impl VPort {
             default_lighting_type: 1,
             brightness: 0.0,
             contrast: 0.0,
-            ambient_color: Color::from_index(250),
+            ambient_color: Color::ByLayer,
             ucs_at_origin: false,
             ucs_per_viewport: true,
             ucs_origin: Vector3::ZERO,
