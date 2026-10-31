@@ -179,6 +179,25 @@ impl DxfClassCollection {
         }
     }
 
+    /// Add a class read from a file. A class the collection already holds (a default) takes the file's record: its C++ name,
+    /// application, proxy flags and entity flags are the file's, its number stays.
+    pub fn add_from_file(&mut self, class: DxfClass) {
+        let key = class.dxf_name.to_uppercase();
+        match self.name_index.get(&key) {
+            Some(&idx) => {
+                let existing = &mut self.entries[idx];
+                existing.cpp_class_name = class.cpp_class_name;
+                existing.application_name = class.application_name;
+                existing.proxy_flags = class.proxy_flags;
+                existing.instance_count = class.instance_count;
+                existing.was_zombie = class.was_zombie;
+                existing.is_an_entity = class.is_an_entity;
+                existing.item_class_id = class.item_class_id;
+            }
+            None => self.add_or_update(class),
+        }
+    }
+
     /// Append a class verbatim, preserving order and duplicate dxf names.
     ///
     /// The DWG classes section is *positional*: a custom object's type code is

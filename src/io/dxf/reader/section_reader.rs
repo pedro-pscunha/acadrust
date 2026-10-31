@@ -3727,7 +3727,7 @@ impl<'a> SectionReader<'a> {
                     0
                 } else {
                     let name = class.dxf_name.clone();
-                    document.classes.add_or_update(class);
+                    document.classes.add_from_file(class);
                     document
                         .classes
                         .get_by_name(&name)
