@@ -1438,6 +1438,10 @@ pub struct CadDocument {
     /// `None` when not loaded from DWG (new/DXF).
     pub dwg_source_version: Option<DxfVersion>,
 
+    /// Imported forward hatch links are authoritative, even when their reverse reactors are absent.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub(crate) source_hatch_boundaries: HashMap<Handle, HashSet<Handle>>,
+
     /// Embedded preview/thumbnail image. Populated by the DWG reader from the
     /// file's preview section; the DWG writer embeds it when `Some` and emits an
     /// empty preview when `None`. Not part of DXF.
@@ -1666,6 +1670,7 @@ impl CadDocument {
             reactors_by_handle: HashMap::new(),
             block_entity_handles: HashMap::new(),
             dwg_source_version: None,
+            source_hatch_boundaries: HashMap::new(),
             preview: None,
             acds_thumbnails: Vec::new(),
             acis_sab_handles: Vec::new(),
