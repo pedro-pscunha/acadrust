@@ -926,7 +926,13 @@ impl<'a> DwgObjectWriter<'a> {
         let transparency_eed = transparency_app.and_then(|app| {
             (!layer.transparency.is_opaque() || had_transparency_eed).then(|| {
                 let mut bytes = vec![71];
-                bytes.extend_from_slice(&layer.transparency.to_dxf_value().to_le_bytes());
+                // An opaque layer's value is packed zero, as AutoCAD stores it (a layer's 0% is not alpha 255).
+                let value = if layer.transparency.is_opaque() {
+                    0
+                } else {
+                    layer.transparency.to_dxf_value()
+                };
+                bytes.extend_from_slice(&value.to_le_bytes());
                 (app.handle.value(), bytes)
             })
         });

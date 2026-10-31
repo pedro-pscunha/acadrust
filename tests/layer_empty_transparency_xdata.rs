@@ -139,3 +139,25 @@ fn an_empty_record_does_not_corrupt_the_layer_in_a_dwg() {
         }
     }
 }
+
+/// An opaque layer whose AcCmTransparency is packed zero in the file is written to the DWG as packed zero, not as alpha 255 with the
+/// by-alpha method (33554687), which AutoCAD does not write for a layer of 0% transparency.
+#[test]
+fn an_opaque_layer_keeps_packed_zero_in_a_dwg() {
+    let doc = read(source(&[(1071, "0")], false).into_bytes());
+    let bytes = DwgWriter::write_to_vec(&doc).expect("write dwg");
+    let back = DwgReader::from_stream(Cursor::new(bytes))
+        .read()
+        .expect("read dwg");
+    let empty = back.layers.get("Empty").expect("the layer");
+    let value = back
+        .object_xdata(empty.handle)
+        .and_then(|x| x.get_record("AcCmTransparency").cloned())
+        .and_then(|record| {
+            record.values.iter().find_map(|value| match value {
+                acadrust::xdata::XDataValue::Integer32(v) => Some(*v),
+                _ => None,
+            })
+        });
+    assert_eq!(value, Some(0));
+}
