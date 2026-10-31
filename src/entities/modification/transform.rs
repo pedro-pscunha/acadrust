@@ -233,8 +233,14 @@ pub(crate) fn transform_polyline2d(e: &mut Polyline2D, transform: &Transform) {
     // normal's OCS.
     let new_normal = transform.apply_rotation(e.normal).normalize();
     let (ocs, new_t) = ocs_pair(e.normal, new_normal);
+    // Widths are lengths in the plane: they scale as a radius or a text height does.
+    let scale_factor = transform.apply_rotation(Vector3::new(1.0, 0.0, 0.0)).length();
+    e.start_width *= scale_factor;
+    e.end_width *= scale_factor;
     for vertex in &mut e.vertices {
         vertex.location = new_t * transform.apply(ocs * vertex.location);
+        vertex.start_width *= scale_factor;
+        vertex.end_width *= scale_factor;
         if flip {
             // Bulge encodes the arc's side/direction in the plane; a
             // reflection reverses it.
