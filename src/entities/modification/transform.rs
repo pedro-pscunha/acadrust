@@ -268,7 +268,12 @@ pub(crate) fn transform_lwpolyline(e: &mut LwPolyline, transform: &Transform) {
     // the shared elevation field.
     let plane_origin = new_t * transform.apply(ocs * Vector3::new(0.0, 0.0, e.elevation));
     let new_elevation = plane_origin.z;
+    // Widths are lengths in the plane: they scale as a radius or a text height does.
+    let scale_factor = transform.apply_rotation(Vector3::new(1.0, 0.0, 0.0)).length();
+    e.constant_width *= scale_factor;
     for vertex in &mut e.vertices {
+        vertex.start_width *= scale_factor;
+        vertex.end_width *= scale_factor;
         let pt3d = Vector3::new(vertex.location.x, vertex.location.y, e.elevation);
         let l = new_t * transform.apply(ocs * pt3d);
         vertex.location.x = l.x;
