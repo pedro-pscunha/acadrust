@@ -7,8 +7,8 @@ mod stream_writer;
 mod text_writer;
 
 pub use binary_writer::DxfBinaryWriter;
-pub(crate) use section_writer::RAW_DWG_OBJECT_SUBCLASS;
 pub use section_writer::SectionWriter;
+pub(crate) use section_writer::RAW_DWG_OBJECT_SUBCLASS;
 pub use stream_writer::{value_type_for_code, DxfStreamWriter, DxfStreamWriterExt};
 pub use text_writer::DxfTextWriter;
 
@@ -139,6 +139,8 @@ pub struct DxfWriter<'a> {
     document: &'a CadDocument,
     /// Whether to write binary DXF format
     pub binary: bool,
+    /// Semantic inspection must not add fields through binary-import compatibility promotion.
+    preserve_binary_version: bool,
     /// Explicit target version; `None` writes the document's own version.
     version: Option<crate::types::DxfVersion>,
     /// Keep a plain 2D polyline as POLYLINE instead of down-saving it to LWPOLYLINE.
@@ -153,6 +155,7 @@ impl<'a> DxfWriter<'a> {
         Self {
             document,
             binary: false,
+            preserve_binary_version: false,
             version: None,
             keep_heavy_polylines: false,
             dwg_bridge: false,
@@ -164,6 +167,7 @@ impl<'a> DxfWriter<'a> {
         Self {
             document,
             binary: true,
+            preserve_binary_version: false,
             version: None,
             keep_heavy_polylines: false,
             dwg_bridge: false,
@@ -196,6 +200,18 @@ impl<'a> DxfWriter<'a> {
     /// define for a record (such as the true colors and zero suppression of a DIMSTYLE). A normal
     /// DXF holds only the groups the Reference defines, so AutoCAD opens it.
     pub fn for_dwg_bridge(mut self) -> Self {
+        self.dwg_bridge = true;
+        self
+    }
+
+    /// A semantic DWG inspection rendition: exact binary numbers, private bridge records,
+    /// heavy polyline units and the document's own release. Unlike binary CAD export,
+    /// this does not promote an old release for importer compatibility or add newer fields.
+    pub fn for_dwg_inspection(mut self) -> Self {
+        self.binary = true;
+        self.preserve_binary_version = true;
+        self.version = None;
+        self.keep_heavy_polylines = true;
         self.dwg_bridge = true;
         self
     }
@@ -381,7 +397,10 @@ impl<'a> DxfWriter<'a> {
 
     fn output_version(&self) -> crate::types::DxfVersion {
         let version = self.version.unwrap_or(self.document.version);
-        if self.binary && version < crate::types::DxfVersion::AC1021 {
+        if self.binary
+            && !self.preserve_binary_version
+            && version < crate::types::DxfVersion::AC1021
+        {
             crate::types::DxfVersion::AC1024
         } else {
             version
