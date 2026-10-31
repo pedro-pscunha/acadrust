@@ -455,8 +455,13 @@ fn count_extra_handles(
                 {
                     continue;
                 }
-                // Vertices + SEQEND all use allocate_handle()
-                count += polyline.vertices.len() as u64 + 1;
+                // A VERTEX or SEQEND that has a handle keeps it (see `write_polyline_child`).
+                count += polyline
+                    .vertices
+                    .iter()
+                    .filter(|vertex| vertex.handle.is_null())
+                    .count() as u64;
+                count += u64::from(seqend_needs_handle(polyline.seqend.as_deref(), None));
             }
             EntityType::Polyline3D(polyline) => {
                 for vertex in &polyline.vertices {
@@ -464,8 +469,7 @@ fn count_extra_handles(
                         count += 1;
                     }
                 }
-                // SEQEND always written
-                count += 1;
+                count += u64::from(seqend_needs_handle(polyline.seqend.as_deref(), None));
             }
             EntityType::PolyfaceMesh(mesh) => {
                 for vertex in &mesh.vertices {
@@ -478,9 +482,10 @@ fn count_extra_handles(
                         count += 1;
                     }
                 }
-                if mesh.seqend_handle.is_none() {
-                    count += 1;
-                }
+                count += u64::from(seqend_needs_handle(
+                    mesh.seqend.as_deref(),
+                    mesh.seqend_handle,
+                ));
             }
             EntityType::PolygonMesh(mesh) => {
                 for vertex in &mesh.vertices {
@@ -488,8 +493,7 @@ fn count_extra_handles(
                         count += 1;
                     }
                 }
-                // SEQEND always needs a handle
-                count += 1;
+                count += u64::from(seqend_needs_handle(mesh.seqend.as_deref(), None));
             }
             EntityType::Insert(insert) => {
                 if insert.has_attributes() {
@@ -498,8 +502,8 @@ fn count_extra_handles(
                         .iter()
                         .filter(|attribute| attribute.common.handle.is_null())
                         .count() as u64;
-                    // SEQEND for attribute sequence
-                    count += 1;
+                    // The SEQEND of the attribute sequence keeps the handle it was read with.
+                    count += u64::from(seqend_needs_handle(None, insert.seqend_handle));
                 }
             }
             _ => {}
@@ -514,6 +518,19 @@ fn count_extra_handles(
         .count() as u64;
 
     count
+}
+
+/// Whether the writer gives a SEQEND a handle of its own: it keeps the one its data (or the entity's own field) holds
+/// (`write_polyline_seqend`, and the SEQEND of an INSERT's attributes).
+fn seqend_needs_handle(
+    seqend: Option<&crate::entities::EntityCommon>,
+    fallback: Option<crate::types::Handle>,
+) -> bool {
+    seqend
+        .map(|seqend| seqend.handle)
+        .filter(|handle| !handle.is_null())
+        .or(fallback)
+        .is_none_or(|handle| handle.is_null())
 }
 
 /// Compute the true maximum handle across all document objects.
