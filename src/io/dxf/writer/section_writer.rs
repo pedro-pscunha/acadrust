@@ -27,6 +27,7 @@ use crate::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
 use super::stream_writer::{DxfStreamWriter, DxfStreamWriterExt};
 use crate::io::dxf::EMBEDDED_LAYOUT_GROUP;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 /// Sanitize a symbol table record name: strip control characters and characters forbidden by ACAD (`< > / \ " : ; ? * , = \``).
@@ -4525,19 +4526,21 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
         // Write reactor group (filter out reactors pointing to non-existent objects)
         if !common.reactors.is_empty() {
-            let valid_reactors: Vec<Handle> = if self.valid_handles.is_empty() {
-                common.reactors.clone()
+            let valid_reactors: Cow<'_, [Handle]> = if self.valid_handles.is_empty() {
+                Cow::Borrowed(&common.reactors)
             } else {
-                common
-                    .reactors
-                    .iter()
-                    .copied()
-                    .filter(|r| self.valid_handles.contains(r))
-                    .collect()
+                Cow::Owned(
+                    common
+                        .reactors
+                        .iter()
+                        .copied()
+                        .filter(|r| self.valid_handles.contains(r))
+                        .collect(),
+                )
             };
             if !valid_reactors.is_empty() {
                 self.writer.write_string(102, "{ACAD_REACTORS")?;
-                for reactor in &valid_reactors {
+                for reactor in valid_reactors.as_ref() {
                     self.writer.write_handle(330, *reactor)?;
                 }
                 self.writer.write_string(102, "}")?;
@@ -5894,18 +5897,20 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
         // Associated entities (boundary handles)
         // Filter to only valid handles if valid_handles is populated
-        let valid_boundary_handles: Vec<Handle> = if self.valid_handles.is_empty() {
-            path.boundary_handles.clone()
+        let valid_boundary_handles: Cow<'_, [Handle]> = if self.valid_handles.is_empty() {
+            Cow::Borrowed(&path.boundary_handles)
         } else {
-            path.boundary_handles
-                .iter()
-                .copied()
-                .filter(|h| *h != Handle::NULL && self.valid_handles.contains(h))
-                .collect()
+            Cow::Owned(
+                path.boundary_handles
+                    .iter()
+                    .copied()
+                    .filter(|h| *h != Handle::NULL && self.valid_handles.contains(h))
+                    .collect(),
+            )
         };
         self.writer
             .write_i32(97, valid_boundary_handles.len() as i32)?;
-        for h in &valid_boundary_handles {
+        for h in valid_boundary_handles.as_ref() {
             self.writer.write_handle(330, *h)?;
         }
 
@@ -8596,19 +8601,21 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
 
         // Reactors (filter out references to non-existent objects)
         if !layout.reactors.is_empty() {
-            let valid_reactors: Vec<Handle> = if self.valid_handles.is_empty() {
-                layout.reactors.clone()
+            let valid_reactors: Cow<'_, [Handle]> = if self.valid_handles.is_empty() {
+                Cow::Borrowed(&layout.reactors)
             } else {
-                layout
-                    .reactors
-                    .iter()
-                    .copied()
-                    .filter(|r| self.valid_handles.contains(r))
-                    .collect()
+                Cow::Owned(
+                    layout
+                        .reactors
+                        .iter()
+                        .copied()
+                        .filter(|r| self.valid_handles.contains(r))
+                        .collect(),
+                )
             };
             if !valid_reactors.is_empty() {
                 self.writer.write_string(102, "{ACAD_REACTORS")?;
-                for r in &valid_reactors {
+                for r in valid_reactors.as_ref() {
                     self.writer.write_handle(330, *r)?;
                 }
                 self.writer.write_string(102, "}")?;

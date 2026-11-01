@@ -1799,7 +1799,7 @@ impl<'a> SectionReader<'a> {
                 continue;
             }
 
-            let var_name = pair.value_string.clone();
+            let var_name = &pair.value_string;
             match var_name.as_str() {
                 "$VIEWCTR" | "$VIEWDIR" | "$TARGET" | "$SNAPBASE" | "$SNAPUNIT" | "$GRIDUNIT"
                 | "$AXISUNIT" => {
