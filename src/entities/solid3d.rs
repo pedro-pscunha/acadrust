@@ -557,6 +557,73 @@ impl AcisData {
         Self::encode_sat_impl(text, false)
     }
 
+    /// The groups that hold this data in a DXF before R2013 (after group 70 = 1): SAT text, converted token for token from the
+    /// SAB when there is no SAT, with the terminator, its lines wrapped between tokens at 240 characters (AutoCAD reads lines of
+    /// up to 255), ciphered (version 1, or any SAB), each line a group 1 and its continuations past 2049 bytes groups 3.
+    /// `binary` is a binary DXF, which writes the cipher without the protective space after an `A`.
+    pub fn dxf_sat_groups(&self, binary: bool) -> Vec<(i32, String)> {
+        let converted;
+        let data: &str = if self.sat_data.is_empty() && !self.sab_data.is_empty() {
+            match crate::entities::acis::SabReader::read(&self.sab_data) {
+                Ok(doc) => {
+                    converted = doc.to_sat_string();
+                    &converted
+                }
+                Err(_) => "",
+            }
+        } else {
+            // Keep the original token stream. Re-serializing expands compact ACIS booleans and makes legacy DXF modelers
+            // reject freeform spline and p-curve payloads.
+            &self.sat_data
+        };
+        if data.is_empty() {
+            return vec![(1, String::new())];
+        }
+        // Append the terminator: internal sat_data never contains it.
+        let mut full = Self::strip_sat_terminator(data);
+        full.push_str("End-of-ACIS-data\n");
+        if full.lines().any(|line| line.len() > 255) {
+            full = full
+                .lines()
+                .flat_map(wrap_sat_line)
+                .fold(String::new(), |mut text, line| {
+                    text.push_str(line);
+                    text.push('\n');
+                    text
+                });
+        }
+        let cipher = self.version == AcisVersion::Version1
+            || (self.sat_data.is_empty() && !self.sab_data.is_empty());
+        let encoded = match (cipher, binary) {
+            (true, true) => Self::encode_sat_binary(&full),
+            (true, false) => Self::encode_sat(&full),
+            (false, _) => full,
+        };
+        let mut groups = Vec::new();
+        for line in encoded.lines() {
+            // Split into 2049-byte pieces without breaking UTF-8: the first is group 1, the rest group 3.
+            let mut remaining = line;
+            let mut code = 1;
+            loop {
+                let mut end = remaining.len().min(2049);
+                while !remaining.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let (chunk, rest) = remaining.split_at(end);
+                groups.push((code, chunk.to_string()));
+                code = 3;
+                remaining = rest;
+                if remaining.is_empty() {
+                    break;
+                }
+            }
+        }
+        if groups.is_empty() {
+            groups.push((1, String::new()));
+        }
+        groups
+    }
+
     fn encode_sat_impl(text: &str, escape_caret: bool) -> String {
         let mut result = String::with_capacity(text.len() + 16);
         for c in text.chars() {
@@ -1094,6 +1161,40 @@ impl Entity for Body {
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// Split a SAT line between tokens (never inside an `@`-counted string) into pieces of about 240 characters.
+fn wrap_sat_line(line: &str) -> Vec<&str> {
+    const LIMIT: usize = 240;
+    let bytes = line.as_bytes();
+    let mut pieces = Vec::new();
+    let (mut start, mut split, mut index) = (0, None, 0);
+    while index < bytes.len() {
+        let token_start = index == 0 || bytes[index - 1] == b' ';
+        if bytes[index] == b'@' && token_start {
+            // Skip the count, the separating space and the counted text.
+            let digits = bytes[index + 1..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            let count: usize = line[index + 1..index + 1 + digits].parse().unwrap_or(0);
+            index = (index + 2 + digits + count).min(bytes.len());
+            continue;
+        }
+        if bytes[index] == b' ' {
+            split = Some(index);
+        }
+        if index - start >= LIMIT {
+            if let Some(at) = split.filter(|&at| at > start) {
+                pieces.push(&line[start..at]);
+                start = at;
+                split = None;
+            }
+        }
+        index += 1;
+    }
+    pieces.push(&line[start..]);
+    pieces
+}
 
 #[cfg(test)]
 mod tests {

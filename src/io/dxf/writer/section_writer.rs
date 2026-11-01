@@ -5249,9 +5249,11 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if mtext.background_fill_flags != 0 {
             self.writer.write_i32(90, mtext.background_fill_flags)?;
             if mtext.background_fill_flags & 1 != 0
-                || (self.dxf_version >= DxfVersion::AC1032 && mtext.background_fill_flags & 0x10 != 0)
+                || (self.dxf_version >= DxfVersion::AC1032
+                    && mtext.background_fill_flags & 0x10 != 0)
             {
-                self.writer.write_i16(63, mtext.background_color.approximate_index())?;
+                self.writer
+                    .write_i16(63, mtext.background_color.approximate_index())?;
                 if let Some(tc) = mtext.background_color.to_true_color_value() {
                     self.writer.write_i32(421, tc)?;
                 }
@@ -11902,89 +11904,9 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
     }
 
     fn write_acis_data(&mut self, acis: &AcisData) -> Result<()> {
-        let converted;
-        let data: &str = if acis.sat_data.is_empty() && !acis.sab_data.is_empty() {
-            // SAB binary only — convert via SabReader.
-            match crate::entities::acis::SabReader::read(&acis.sab_data) {
-                Ok(doc) => {
-                    converted = doc.to_sat_string();
-                    &converted
-                }
-                Err(_) => "",
-            }
-        } else if !acis.sat_data.is_empty() {
-            // Keep the original token stream. Re-serializing expands compact
-            // ACIS booleans and makes legacy DXF modelers reject freeform
-            // spline and p-curve payloads.
-            &acis.sat_data
-        } else {
-            &acis.sat_data
-        };
-
-        if data.is_empty() {
-            self.writer.write_string(1, "")?;
-            return Ok(());
+        for (code, value) in acis.dxf_sat_groups(self.writer.is_binary()) {
+            self.writer.write_string(code, &value)?;
         }
-
-        // Append the terminator — internal sat_data never contains it.
-        let mut full = AcisData::strip_sat_terminator(data);
-        full.push_str("End-of-ACIS-data\n");
-        // SAT text from a binary body has one line per record; the reference
-        // application only reads lines of up to 255 characters, so long
-        // records are wrapped between tokens as ACIS itself writes them.
-        if full.lines().any(|line| line.len() > 255) {
-            full = full
-                .lines()
-                .flat_map(wrap_sat_line)
-                .fold(String::new(), |mut text, line| {
-                    text.push_str(line);
-                    text.push('\n');
-                    text
-                });
-        }
-
-        // Version 1: apply the DXF character cipher to SAT text.
-        // SAB-converted data is always treated as Version1 for DXF output.
-        let use_version1_cipher = acis.version == AcisVersion::Version1
-            || (acis.sat_data.is_empty() && !acis.sab_data.is_empty());
-        let encoded = if use_version1_cipher {
-            if self.writer.is_binary() {
-                AcisData::encode_sat_binary(&full)
-            } else {
-                AcisData::encode_sat(&full)
-            }
-        } else {
-            full
-        };
-
-        let mut any_written = false;
-        for line in encoded.lines() {
-            if line.len() <= 2049 {
-                // Whole line fits in one chunk → group code 1
-                self.writer.write_string(1, line)?;
-            } else {
-                // Split into 2049-byte sub-chunks without breaking UTF-8:
-                // the first sub-chunk → gc 1, continuations → gc 3
-                let mut remaining = line;
-                let mut code = 1;
-                while !remaining.is_empty() {
-                    let mut end = remaining.len().min(2049);
-                    while !remaining.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    let (chunk, rest) = remaining.split_at(end);
-                    self.writer.write_string(code, chunk)?;
-                    code = 3;
-                    remaining = rest;
-                }
-            }
-            any_written = true;
-        }
-
-        if !any_written {
-            self.writer.write_string(1, "")?;
-        }
-
         Ok(())
     }
 
@@ -13393,37 +13315,4 @@ fn get_invisible_edge_bits(flags: &InvisibleEdgeFlags) -> u8 {
 /// Helper to extract boundary path flag bits
 fn get_boundary_path_bits(flags: &BoundaryPathFlags) -> u32 {
     flags.bits()
-}
-
-fn wrap_sat_line(line: &str) -> Vec<&str> {
-    const LIMIT: usize = 240;
-    let bytes = line.as_bytes();
-    let mut pieces = Vec::new();
-    let (mut start, mut split, mut index) = (0, None, 0);
-    while index < bytes.len() {
-        let token_start = index == 0 || bytes[index - 1] == b' ';
-        if bytes[index] == b'@' && token_start {
-            // Skip the count, the separating space and the counted text.
-            let digits = bytes[index + 1..]
-                .iter()
-                .take_while(|b| b.is_ascii_digit())
-                .count();
-            let count: usize = line[index + 1..index + 1 + digits].parse().unwrap_or(0);
-            index = (index + 2 + digits + count).min(bytes.len());
-            continue;
-        }
-        if bytes[index] == b' ' {
-            split = Some(index);
-        }
-        if index - start >= LIMIT {
-            if let Some(at) = split.filter(|&at| at > start) {
-                pieces.push(&line[start..at]);
-                start = at;
-                split = None;
-            }
-        }
-        index += 1;
-    }
-    pieces.push(&line[start..]);
-    pieces
 }
