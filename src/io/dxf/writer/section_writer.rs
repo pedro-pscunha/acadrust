@@ -5243,16 +5243,19 @@ impl<'a, W: DxfStreamWriter> SectionWriter<'a, W> {
         if let Some(h) = mtext.rectangle_height {
             self.writer.write_double(46, h)?;
         }
-        // Background fill — only when enabled by the flags.
+        // Background fill, in AutoCAD's form: the colour (63, the nearest index of a true colour, then 421), box scale and
+        // transparency only for a fill with its own colour (bit 1; from R2018 also the text frame, 0x10), as the DWG stores
+        // them. AutoCAD's DXF reader discards a file whose fill has another form.
         if mtext.background_fill_flags != 0 {
             self.writer.write_i32(90, mtext.background_fill_flags)?;
-            self.writer.write_double(45, mtext.background_scale)?;
-            if let Some(tc) = mtext.background_color.to_true_color_value() {
-                self.writer.write_i32(421, tc)?;
-            } else if let Some(idx) = mtext.background_color.index() {
-                self.writer.write_i16(63, idx as i16)?;
-            }
-            if mtext.background_transparency != 0 {
+            if mtext.background_fill_flags & 1 != 0
+                || (self.dxf_version >= DxfVersion::AC1032 && mtext.background_fill_flags & 0x10 != 0)
+            {
+                self.writer.write_i16(63, mtext.background_color.approximate_index())?;
+                if let Some(tc) = mtext.background_color.to_true_color_value() {
+                    self.writer.write_i32(421, tc)?;
+                }
+                self.writer.write_double(45, mtext.background_scale)?;
                 self.writer.write_i32(441, mtext.background_transparency)?;
             }
         }
