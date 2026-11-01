@@ -19,7 +19,9 @@ pub(crate) fn append_hex(data: &mut Vec<u8>, value: &str) -> Result<()> {
         ));
     }
     let bytes: Result<Vec<_>> = value
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let high = (pair[0] as char).to_digit(16);
             let low = (pair[1] as char).to_digit(16);

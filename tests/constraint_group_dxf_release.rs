@@ -90,8 +90,11 @@ fn document(version: DxfVersion) -> (CadDocument, Handle) {
     (document, handle)
 }
 
-/// (node id, status, connections, class name) of each node, and the next node id.
-fn nodes(document: &CadDocument, handle: Handle) -> (Vec<(i32, u8, Vec<i32>, String)>, i32) {
+/// A node's id, status, connections and class name.
+type Node = (i32, u8, Vec<i32>, String);
+
+/// Each node of the group, and the next node id.
+fn nodes(document: &CadDocument, handle: Handle) -> (Vec<Node>, i32) {
     let Some(ObjectType::Associative(object)) = document.objects.get(&handle) else {
         panic!("the group is missing");
     };

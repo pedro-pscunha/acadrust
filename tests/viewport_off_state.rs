@@ -54,7 +54,7 @@ fn dxf_status_group_68_respects_explicit_off_and_off_screen() {
             let doc = drawing(bits, off_screen);
             let text = String::from_utf8(DxfWriter::new(&doc).write_to_vec().unwrap()).unwrap();
             let lines: Vec<_> = text.lines().collect();
-            let fields: Vec<_> = lines.chunks_exact(2).collect();
+            let fields: Vec<_> = lines.as_chunks::<2>().0.iter().collect();
             let start = fields
                 .iter()
                 .enumerate()
@@ -127,7 +127,7 @@ fn old_serialized_status_defaults_explicit_off_to_false() {
 fn statuses(doc: &CadDocument) -> Vec<i32> {
     let text = String::from_utf8(DxfWriter::new(doc).write_to_vec().unwrap()).unwrap();
     let lines: Vec<_> = text.lines().collect();
-    let fields: Vec<_> = lines.chunks_exact(2).collect();
+    let fields: Vec<_> = lines.as_chunks::<2>().0.iter().collect();
     let mut out = Vec::new();
     let mut in_viewport = false;
     for pair in fields {

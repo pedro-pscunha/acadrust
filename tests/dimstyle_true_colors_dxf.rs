@@ -170,7 +170,7 @@ fn the_default_dxf_gets_no_private_groups() {
         assert!(records.len() >= 2, "{version:?}: no DIMSTYLE records");
         for record in records {
             assert!(
-                record.iter().all(|c| !matches!(*c, 421 | 422 | 423 | 424)),
+                record.iter().all(|c| !matches!(*c, 421..=424)),
                 "{version:?}: {record:?}"
             );
         }
