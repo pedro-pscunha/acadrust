@@ -1205,8 +1205,9 @@ pub fn read_dimstyle(
         dimltype_handle: 0,
         dimltex1_handle: 0,
         dimltex2_handle: 0,
-        dimfxl: 0.0,
-        dimjogang: 0.0,
+        // Fields from R2007: an older file has none, so a style read from it keeps AutoCAD's defaults.
+        dimfxl: 1.0,
+        dimjogang: std::f64::consts::FRAC_PI_4,
         dimtfill: 0,
         dimtfillclr: Color::from_index(0),
         dimarcsym: 0,
